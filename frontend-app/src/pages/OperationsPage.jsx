@@ -5,6 +5,7 @@ import {
   deleteAlertRule,
   fetchAlerts,
   fetchIngestionRuns,
+  fetchIngestionSources,
   triggerIngestionSync,
   updateAlertRule,
 } from "../api/operationsClient";
@@ -37,6 +38,7 @@ export function OperationsPage() {
   const canManageOperations = ["admin", "analyst"].includes(session?.user?.role ?? "");
   const [alerts, setAlerts] = useState([]);
   const [ingestionRuns, setIngestionRuns] = useState([]);
+  const [ingestionSources, setIngestionSources] = useState([]);
   const [alertForm, setAlertForm] = useState(emptyAlertForm);
   const [errorMessage, setErrorMessage] = useState("");
   const [infoMessage, setInfoMessage] = useState("");
@@ -45,6 +47,8 @@ export function OperationsPage() {
   const [activeAlertId, setActiveAlertId] = useState("");
   const [editingAlertId, setEditingAlertId] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [selectedSourceName, setSelectedSourceName] = useState("starter_feed");
+  const [selectedRunId, setSelectedRunId] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -53,12 +57,15 @@ export function OperationsPage() {
       setIsLoading(true);
       setErrorMessage("");
       try {
-        const [alertData, runData] = await Promise.all([fetchAlerts(), fetchIngestionRuns()]);
+        const [alertData, runData, sourceData] = await Promise.all([fetchAlerts(), fetchIngestionRuns(), fetchIngestionSources()]);
         if (!isMounted) {
           return;
         }
         setAlerts(alertData);
         setIngestionRuns(runData);
+        setIngestionSources(sourceData);
+        setSelectedSourceName(sourceData[0]?.source_name ?? "starter_feed");
+        setSelectedRunId(runData[0]?.id ?? "");
       } catch (error) {
         if (isMounted) {
           setErrorMessage(error instanceof Error ? error.message : "Unable to load operations data.");
@@ -181,8 +188,9 @@ export function OperationsPage() {
       setIsSyncing(true);
       setErrorMessage("");
       setInfoMessage("");
-      const run = await triggerIngestionSync();
+      const run = await triggerIngestionSync(selectedSourceName);
       setIngestionRuns((current) => [run, ...current]);
+      setSelectedRunId(run.id);
       setInfoMessage(`Ingestion sync completed for ${run.source_name}.`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to trigger the ingestion sync.");
@@ -190,6 +198,15 @@ export function OperationsPage() {
       setIsSyncing(false);
     }
   }
+
+  const selectedSource =
+    ingestionSources.find((source) => source.source_name === selectedSourceName) ??
+    ingestionSources[0] ??
+    null;
+  const selectedRun =
+    ingestionRuns.find((run) => run.id === selectedRunId) ??
+    ingestionRuns[0] ??
+    null;
 
   return (
     <main className="content about-content">
@@ -325,16 +342,54 @@ export function OperationsPage() {
             description="Monitor source sync history and trigger the local starter feed when you want fresh demo data loaded."
           />
           {canManageOperations ? (
-            <button type="button" className="ghost-button" onClick={handleSync} disabled={isSyncing}>
-              {isSyncing ? "Running sync..." : "Run starter feed sync"}
-            </button>
+            <div className="login-form project-form">
+              <label>
+                Source
+                <select
+                  className="login-select"
+                  value={selectedSourceName}
+                  onChange={(event) => setSelectedSourceName(event.target.value)}
+                >
+                  {ingestionSources.map((source) => (
+                    <option key={source.source_name} value={source.source_name}>
+                      {source.source_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className="ghost-button" onClick={handleSync} disabled={isSyncing || !selectedSourceName}>
+                {isSyncing ? "Running sync..." : `Run ${selectedSourceName || "source"} sync`}
+              </button>
+            </div>
           ) : (
             <p className="hint-text">Your current role can view ingestion history, but only analysts and admins can trigger syncs.</p>
           )}
 
+          {selectedSource ? (
+            <div className="project-locked-panel">
+              <p className="panel-label">Selected source</p>
+              <strong>{selectedSource.source_name}</strong>
+              <p className="hint-text">
+                {selectedSource.listing_count} listings and {selectedSource.market_insight_count} market insights are available in this feed.
+              </p>
+            </div>
+          ) : null}
+
           <div className="admin-request-list">
             {ingestionRuns.map((run) => (
-              <article key={run.id} className="admin-request-card">
+              <article
+                key={run.id}
+                className="admin-request-card"
+                onClick={() => setSelectedRunId(run.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedRunId(run.id);
+                  }
+                }}
+              >
                 <div>
                   <strong>{run.source_name}</strong>
                   <p>{run.detail}</p>
@@ -353,6 +408,41 @@ export function OperationsPage() {
             ))}
             {!ingestionRuns.length && !isLoading ? <p className="hint-text">No ingestion runs have been recorded yet.</p> : null}
           </div>
+          {selectedRun ? (
+            <div className="document-preview-panel">
+              <div className="projects-header-row">
+                <div>
+                  <p className="panel-label">Run detail</p>
+                  <h3 className="projects-heading">{selectedRun.source_name}</h3>
+                </div>
+                <span className={`status-pill ${selectedRun.status === "completed" ? "status-live" : selectedRun.status === "running" ? "status-pending" : "status-error"}`}>
+                  {selectedRun.status}
+                </span>
+              </div>
+              <div className="project-summary-grid">
+                <div className="project-summary-card">
+                  <span>Processed</span>
+                  <strong>{selectedRun.records_processed}</strong>
+                </div>
+                <div className="project-summary-card">
+                  <span>Created</span>
+                  <strong>{selectedRun.records_created}</strong>
+                </div>
+                <div className="project-summary-card">
+                  <span>Updated</span>
+                  <strong>{selectedRun.records_updated}</strong>
+                </div>
+                <div className="project-summary-card">
+                  <span>Started</span>
+                  <strong>{formatDateTime(selectedRun.started_at)}</strong>
+                </div>
+                <div className="project-summary-card project-summary-card-wide">
+                  <span>Run detail</span>
+                  <strong>{selectedRun.detail}</strong>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
     </main>

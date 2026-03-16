@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from app.schemas.auth import AuthUser
-from app.schemas.ingestion import IngestionRunSummary
+from app.schemas.ingestion import IngestionRunSummary, IngestionSourceSummary
 from app.schemas.listing import ListingSummary
 from app.schemas.market import MarketInsight
 from app.services.authorization_service import authorization_service
@@ -20,6 +20,24 @@ class IngestionService:
     def list_runs(self, user: AuthUser) -> list[IngestionRunSummary]:
         authorization_service.require_tenant_editor(user)
         return platform_storage_service.list_ingestion_runs(user.tenant_id)
+
+    def list_sources(self, user: AuthUser) -> list[IngestionSourceSummary]:
+        authorization_service.require_tenant_editor(user)
+        sources: list[IngestionSourceSummary] = []
+        for file_path in sorted(self._data_dir.glob("*.json")):
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+            source_tenant_id = payload.get("tenant_id")
+            if source_tenant_id not in {None, user.tenant_id}:
+                continue
+            sources.append(
+                IngestionSourceSummary(
+                    source_name=payload.get("source_name") or file_path.stem,
+                    tenant_id=source_tenant_id,
+                    listing_count=len(payload.get("listings", [])),
+                    market_insight_count=len(payload.get("market_insights", [])),
+                )
+            )
+        return sources
 
     def sync_source(self, source_name: str, user: AuthUser) -> IngestionRunSummary:
         authorization_service.require_tenant_editor(user)

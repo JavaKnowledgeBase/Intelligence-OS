@@ -50,6 +50,11 @@ export async function fetchIngestionRuns() {
   return readJsonOrThrow(response, "Unable to load ingestion runs.");
 }
 
+export async function fetchIngestionSources() {
+  const response = await authenticatedFetch("/ingestion/sources");
+  return readJsonOrThrow(response, "Unable to load ingestion sources.");
+}
+
 export async function triggerIngestionSync(sourceName = "starter_feed") {
   const response = await authenticatedFetch("/ingestion/sync", {
     method: "POST",

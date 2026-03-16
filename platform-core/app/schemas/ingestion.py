@@ -22,3 +22,12 @@ class IngestionRunSummary(BaseModel):
     detail: str
     started_at: datetime
     completed_at: datetime | None = None
+
+
+class IngestionSourceSummary(BaseModel):
+    """Available local ingestion source metadata for the operations UI."""
+
+    source_name: str
+    tenant_id: str | None = None
+    listing_count: int
+    market_insight_count: int

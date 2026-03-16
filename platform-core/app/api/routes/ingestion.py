@@ -2,11 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_user
 from app.schemas.auth import AuthUser
-from app.schemas.ingestion import IngestionRunSummary, IngestionTriggerRequest
+from app.schemas.ingestion import IngestionRunSummary, IngestionSourceSummary, IngestionTriggerRequest
 from app.services.ingestion_service import ingestion_service
 
 
 router = APIRouter()
+
+
+@router.get("/sources", response_model=list[IngestionSourceSummary])
+def list_ingestion_sources(current_user: AuthUser = Depends(get_current_user)) -> list[IngestionSourceSummary]:
+    """Return available local ingestion sources for the caller's tenant."""
+    return ingestion_service.list_sources(current_user)
 
 
 @router.get("/runs", response_model=list[IngestionRunSummary])
