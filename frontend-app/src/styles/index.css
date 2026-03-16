@@ -33,6 +33,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -930,6 +931,21 @@ a {
 }
 
 .login-form input:focus {
+  outline: none;
+  border-color: rgba(127, 212, 196, 0.45);
+  box-shadow: 0 0 0 4px rgba(127, 212, 196, 0.12);
+}
+
+.login-select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f4f6fb;
+}
+
+.login-select:focus {
   outline: none;
   border-color: rgba(127, 212, 196, 0.45);
   box-shadow: 0 0 0 4px rgba(127, 212, 196, 0.12);

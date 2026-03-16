@@ -159,8 +159,8 @@ export function DashboardPage() {
             <button className="primary-button" type="button" onClick={() => navigate("/projects")}>
               Open workspace
             </button>
-            <button className="ghost-button" type="button" onClick={() => navigate("/architecture")}>
-              Review architecture
+            <button className="ghost-button" type="button" onClick={() => navigate("/listings")}>
+              Browse listings
             </button>
           </div>
         </div>

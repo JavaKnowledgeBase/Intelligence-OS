@@ -11,6 +11,7 @@ import { AdminPage } from "./pages/AdminPage";
 import { ArchitecturePage } from "./pages/ArchitecturePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { ListingsPage } from "./pages/ListingsPage";
 import { OperationsPage } from "./pages/OperationsPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
@@ -118,6 +119,9 @@ function AppLayout() {
               <NavLink to="/projects" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
                 Projects
               </NavLink>
+              <NavLink to="/listings" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
+                Listings
+              </NavLink>
               <NavLink to="/architecture" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
                 Architecture
               </NavLink>
@@ -174,6 +178,14 @@ function AppLayout() {
           element={
             <ProtectedRoute isReady={authReady} isAuthenticated={signedIn}>
               <DashboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/listings"
+          element={
+            <ProtectedRoute isReady={authReady} isAuthenticated={signedIn}>
+              <ListingsPage />
             </ProtectedRoute>
           }
         />
