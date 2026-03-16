@@ -1,0 +1,56 @@
+{
+  "source_name": "starter_feed",
+  "tenant_id": "tenant-torilaure",
+  "listings": [
+    {
+      "id": "deal-feed-charlotte",
+      "project_id": "proj-roi-sunbelt",
+      "title": "Charlotte Medical Office Cluster",
+      "asset_class": "real-estate",
+      "location": "Charlotte, NC",
+      "asking_price": 7100000,
+      "projected_irr": 17.9,
+      "deal_score": 86,
+      "summary": "Medical office assets with recession-resistant tenancy and renewal upside.",
+      "risk_level": "medium",
+      "occupancy_rate": 92.7,
+      "hold_period_months": 60,
+      "status": "screening"
+    },
+    {
+      "id": "deal-feed-austin",
+      "project_id": null,
+      "title": "Austin Specialty Services Platform",
+      "asset_class": "business",
+      "location": "Austin, TX",
+      "asking_price": 4300000,
+      "projected_irr": 21.4,
+      "deal_score": 90,
+      "summary": "Fragmented service niche with strong recurring revenue retention.",
+      "risk_level": "medium",
+      "occupancy_rate": null,
+      "hold_period_months": 48,
+      "status": "pipeline"
+    }
+  ],
+  "market_insights": [
+    {
+      "id": "insight-feed-southeast",
+      "region": "Southeast",
+      "signal": "Private capital is re-entering neighborhood retail with stricter debt coverage assumptions.",
+      "trend": "up",
+      "confidence": 0.79,
+      "source": "starter_feed",
+      "as_of_date": "2026-03-16"
+    },
+    {
+      "id": "insight-feed-texas",
+      "region": "Texas",
+      "signal": "Service-sector acquisitions still price attractively where owner dependence can be reduced in year one.",
+      "trend": "stable",
+      "confidence": 0.83,
+      "source": "starter_feed",
+      "as_of_date": "2026-03-16"
+    }
+  ]
+}

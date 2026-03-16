@@ -1,0 +1,48 @@
+from datetime import datetime
+
+from pydantic import BaseModel, Field
+
+from app.schemas.listing import ListingSummary
+from app.schemas.market import MarketInsight
+
+
+class ProjectCreate(BaseModel):
+    """Payload for creating a new shared platform project."""
+
+    name: str = Field(min_length=3)
+    project_type: str
+    owner: str
+    stage: str = "screening"
+    investment_thesis: str = ""
+    target_irr: float | None = None
+    budget_amount: float | None = None
+
+
+class ProjectSummary(BaseModel):
+    """Top-level project record shown in workspace lists and summaries."""
+
+    id: str
+    name: str
+    tenant_id: str
+    project_type: str
+    owner: str
+    owner_id: str
+    member_ids: list[str]
+    status: str
+    active_deals: int
+    stage: str = "screening"
+    investment_thesis: str = ""
+    target_irr: float | None = None
+    budget_amount: float | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class PlatformOverview(BaseModel):
+    """Dashboard aggregate that combines project, listing, and market snapshots."""
+
+    total_projects: int
+    total_listings: int
+    average_deal_score: float
+    featured_deals: list[ListingSummary]
+    market_insights: list[MarketInsight]
