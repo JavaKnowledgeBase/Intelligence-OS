@@ -276,7 +276,7 @@ export function ProjectsPage() {
               title="Project evidence upload"
               description="Use the same upload module for deal memos, underwriting packs, lease schedules, or later ingestion-ready evidence files."
               buttonLabel="Stage evidence file"
-              helperText="This currently prepares the UX and shared component contract. The project document API comes next."
+              helperText="Project-scoped document uploads are live inside each project workspace."
             />
           </div>
         </div>
