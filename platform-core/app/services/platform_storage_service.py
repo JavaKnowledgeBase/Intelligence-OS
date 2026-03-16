@@ -16,14 +16,18 @@ from app.models.platform_tables import (
     IngestionRunRecord,
     ListingRecord,
     MarketInsightRecord,
+    ProjectDocumentRecord,
     ProjectMemberRecord,
+    ProjectNoteRecord,
     ProjectRecord,
 )
 from app.models.seed_data import ALERTS, LISTINGS, MARKET_INSIGHTS, PROJECTS
 from app.schemas.alert import AlertPreference, AlertPreferenceCreate
+from app.schemas.document import ProjectDocumentSummary
 from app.schemas.ingestion import IngestionRunSummary
 from app.schemas.listing import ListingCreate, ListingSummary
 from app.schemas.market import MarketInsight, MarketInsightCreate
+from app.schemas.note import ProjectNoteSummary
 from app.schemas.project import ProjectSummary
 
 
@@ -47,6 +51,8 @@ class PlatformStorageService:
                 "market_insights",
                 "alert_preferences",
                 "ingestion_runs",
+                "project_documents",
+                "project_notes",
             }
             if not required_tables.issubset(set(inspector.get_table_names())):
                 raise SQLAlchemyError("Platform tables are missing. Run `alembic upgrade head`.")
@@ -115,6 +121,84 @@ class PlatformStorageService:
             session.flush()
             session.refresh(record)
             return self._to_project_summary(record)
+
+    def list_project_documents(self, tenant_id: str, project_id: str) -> list[ProjectDocumentSummary]:
+        with self.session_scope() as session:
+            records = session.scalars(
+                select(ProjectDocumentRecord)
+                .where(
+                    ProjectDocumentRecord.tenant_id == tenant_id,
+                    ProjectDocumentRecord.project_id == project_id,
+                )
+                .order_by(ProjectDocumentRecord.uploaded_at.desc(), ProjectDocumentRecord.file_name.asc())
+            ).all()
+            return [self._to_project_document_summary(record) for record in records]
+
+    def create_project_document(
+        self,
+        *,
+        project_id: str,
+        tenant_id: str,
+        file_name: str,
+        stored_name: str,
+        content_type: str,
+        file_size_bytes: int,
+        uploaded_by: str,
+        processing_status: str,
+        preview_available: bool,
+        extracted_text_excerpt: str,
+    ) -> ProjectDocumentSummary:
+        with self.session_scope() as session:
+            record = ProjectDocumentRecord(
+                id=f"doc-{uuid4().hex[:8]}",
+                project_id=project_id,
+                tenant_id=tenant_id,
+                file_name=file_name,
+                stored_name=stored_name,
+                content_type=content_type,
+                file_size_bytes=file_size_bytes,
+                uploaded_by=uploaded_by,
+                processing_status=processing_status,
+                preview_available=preview_available,
+                extracted_text_excerpt=extracted_text_excerpt,
+            )
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return self._to_project_document_summary(record)
+
+    def list_project_notes(self, tenant_id: str, project_id: str) -> list[ProjectNoteSummary]:
+        with self.session_scope() as session:
+            records = session.scalars(
+                select(ProjectNoteRecord)
+                .where(
+                    ProjectNoteRecord.tenant_id == tenant_id,
+                    ProjectNoteRecord.project_id == project_id,
+                )
+                .order_by(ProjectNoteRecord.created_at.desc())
+            ).all()
+            return [self._to_project_note_summary(record) for record in records]
+
+    def create_project_note(
+        self,
+        *,
+        project_id: str,
+        tenant_id: str,
+        author_name: str,
+        content: str,
+    ) -> ProjectNoteSummary:
+        with self.session_scope() as session:
+            record = ProjectNoteRecord(
+                id=f"note-{uuid4().hex[:8]}",
+                project_id=project_id,
+                tenant_id=tenant_id,
+                author_name=author_name,
+                content=content,
+            )
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return self._to_project_note_summary(record)
 
     def list_listings(self, tenant_id: str) -> list[ListingSummary]:
         with self.session_scope() as session:
@@ -418,6 +502,32 @@ class PlatformStorageService:
             detail=record.detail,
             started_at=record.started_at,
             completed_at=record.completed_at,
+        )
+
+    def _to_project_document_summary(self, record: ProjectDocumentRecord) -> ProjectDocumentSummary:
+        return ProjectDocumentSummary(
+            id=record.id,
+            project_id=record.project_id,
+            tenant_id=record.tenant_id,
+            file_name=record.file_name,
+            stored_name=record.stored_name,
+            content_type=record.content_type,
+            file_size_bytes=record.file_size_bytes,
+            uploaded_by=record.uploaded_by,
+            processing_status=record.processing_status,
+            preview_available=record.preview_available,
+            extracted_text_excerpt=record.extracted_text_excerpt,
+            uploaded_at=record.uploaded_at,
+        )
+
+    def _to_project_note_summary(self, record: ProjectNoteRecord) -> ProjectNoteSummary:
+        return ProjectNoteSummary(
+            id=record.id,
+            project_id=record.project_id,
+            tenant_id=record.tenant_id,
+            author_name=record.author_name,
+            content=record.content,
+            created_at=record.created_at,
         )
 
 

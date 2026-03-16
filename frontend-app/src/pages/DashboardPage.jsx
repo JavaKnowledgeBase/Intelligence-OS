@@ -156,7 +156,7 @@ export function DashboardPage() {
             deal analytics, scoring, market intelligence, and alerts.
           </p>
           <div className="hero-actions">
-            <button className="primary-button" type="button" onClick={() => navigate("/login")}>
+            <button className="primary-button" type="button" onClick={() => navigate("/projects")}>
               Open workspace
             </button>
             <button className="ghost-button" type="button" onClick={() => navigate("/architecture")}>

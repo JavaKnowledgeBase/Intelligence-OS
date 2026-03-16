@@ -25,10 +25,10 @@ torilaure-intelligence-os/
 ## What Is Included
 
 - `platform-core`: FastAPI application with shared project, listing, ROI, scoring, market, search, and alert APIs.
-- `frontend-app`: React + Vite dashboard for investors, analysts, and operators.
+- `frontend-app`: React + Vite application with login, dashboard, architecture, about, and project workspace pages.
 - `services/forecast-service`: starter Python service for retail demand forecasting.
 - `services/valuation-service`: starter Python service for business and asset valuation.
-- `infra/docker`: local Docker Compose stack for the API and web app.
+- `infra/docker`: local Docker Compose stack for the API, web app, PostgreSQL, and Redis.
 
 ## Quick Start
 
@@ -88,15 +88,47 @@ The starter local feed source is `starter_feed`.
 
 ### Frontend
 
+Recommended runtime:
+- Node.js `20.x` or `22.x` LTS
+
 ```bash
 cd frontend-app
 npm install
 npm run dev
 ```
 
+### Docker Desktop
+
+```bash
+cd infra/docker
+docker compose up --build
+```
+
+Local defaults:
+- Frontend: `http://localhost:5174`
+- Backend: `http://localhost:8000`
+
+Demo login:
+- `ravi@torilaure.com`
+- `Torilaure123!`
+
+Implemented self-service auth:
+- create account
+- request admin access
+- password reset test flow
+
+## Current Product Surface
+
+- `Login`: email/password sign-in, self-service account creation, admin-access request, password reset test flow
+- `Dashboard`: live overview, featured deals, and market signals from FastAPI
+- `Projects`: shared project workspace with project listing and guided project creation
+- `Architecture`: system blueprint for the platform foundation
+- `About`: in-app references to setup, security, architecture, and OAuth planning docs
+
 ## Suggested Next Steps
 
 1. Add external connectors for broker feeds, CRM exports, and market data providers.
 2. Add Microsoft OAuth and enterprise identity federation.
-3. Move scoring, retrieval, and notifications to independent services behind an API gateway.
-4. Add background workers and scheduling for unattended ingestion runs.
+3. Add deeper project workspaces with project detail, members, notes, and document uploads.
+4. Move scoring, retrieval, and notifications to independent services behind an API gateway.
+5. Add background workers and scheduling for unattended ingestion runs.

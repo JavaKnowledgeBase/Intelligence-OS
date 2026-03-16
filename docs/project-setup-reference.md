@@ -28,11 +28,14 @@ Auth/session helpers:
 - `frontend-app/src/auth.js`
 - `frontend-app/src/api/authClient.js`
 - `frontend-app/src/api/sessionClient.js`
+- `frontend-app/src/api/projectClient.js`
 
 Pages:
 - `frontend-app/src/pages/LoginPage.jsx`
 - `frontend-app/src/pages/DashboardPage.jsx`
 - `frontend-app/src/pages/ArchitecturePage.jsx`
+- `frontend-app/src/pages/AboutPage.jsx`
+- `frontend-app/src/pages/ProjectsPage.jsx`
 
 Components:
 - `frontend-app/src/components/BrandMark.jsx`
@@ -50,6 +53,9 @@ Frontend config/build:
 - `frontend-app/package-lock.json`
 - `frontend-app/index.html`
 - `frontend-app/vite.config.js`
+- `frontend-app/Dockerfile`
+- `frontend-app/nginx.conf`
+- `frontend-app/.dockerignore`
 
 ## Backend Files Created
 
@@ -102,6 +108,7 @@ Database/migrations:
 - `platform-core/alembic/script.py.mako`
 - `platform-core/alembic/versions/20260316_000001_initial_schema.py`
 - `platform-core/alembic/versions/20260316_000002_session_and_ingestion.py`
+- `platform-core/alembic/versions/20260316_000003_auth_self_service.py`
 
 Data sources:
 - `platform-core/data_sources/starter_feed.json`
@@ -109,6 +116,8 @@ Data sources:
 Backend config:
 - `platform-core/requirements.txt`
 - `platform-core/.env.example`
+- `platform-core/Dockerfile`
+- `platform-core/.dockerignore`
 
 ## Supporting Files Created
 
@@ -130,6 +139,7 @@ Frontend:
 - `react-router-dom`
 - `vite`
 - `@vitejs/plugin-react`
+- `nginx` in the production container image
 
 Backend:
 - `fastapi`
@@ -141,6 +151,7 @@ Backend:
 - `psycopg[binary]`
 - `redis`
 - `alembic`
+- `python-multipart` if form uploads are added later
 
 Python standard library used in the backend:
 - `os`
@@ -189,6 +200,7 @@ Frontend:
 - React Router page routing
 - localStorage-backed frontend session state
 - FastAPI API consumption through `fetch`
+- Dockerized static frontend served by `nginx`
 
 Backend:
 - FastAPI app with versioned `/api/v1` routes
@@ -197,6 +209,7 @@ Backend:
 - JWT auth with refresh rotation and logout invalidation
 - Alembic-managed schema migrations
 - local file-based ingestion pipeline
+- Dockerized API startup with migration-first boot
 
 ## Notes For Future Resume
 

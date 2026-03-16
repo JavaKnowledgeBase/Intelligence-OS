@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from statistics import mean
 from uuid import uuid4
 
@@ -8,11 +9,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.alert import AlertPreference, AlertPreferenceCreate
 from app.schemas.auth import AuthUser
+from app.schemas.document import ProjectDocumentSummary
 from app.schemas.listing import DealSearchResponse, ListingCreate, ListingSummary
 from app.schemas.market import MarketInsight, MarketInsightCreate
-from app.schemas.project import PlatformOverview, ProjectCreate, ProjectSummary
+from app.schemas.note import ProjectActivityItem, ProjectNoteCreate, ProjectNoteSummary
+from app.schemas.project import PlatformOverview, ProjectCreate, ProjectSummary, ProjectWorkspace
 from app.services.authorization_service import authorization_service
 from app.services.platform_storage_service import platform_storage_service
+from app.services.project_document_service import project_document_service
 
 
 class PlatformService:
@@ -61,6 +65,60 @@ class PlatformService:
             self._projects.append(project)
             return project
         return saved_project
+
+    def get_project_workspace(self, project_id: str, user: AuthUser) -> ProjectWorkspace:
+        """Return a project-scoped workspace bundle for the frontend detail page."""
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        listings = [listing for listing in self.list_listings(user) if listing.project_id == project_id]
+        documents = self.list_project_documents(project_id, user)
+        notes = self.list_project_notes(project_id, user)
+        return ProjectWorkspace(
+            project=project,
+            listings=listings,
+            market_insights=self.get_market_insights(user),
+            alerts=self.list_alerts(user),
+            documents=documents,
+            notes=notes,
+            activity=self._build_project_activity(project, documents, notes),
+        )
+
+    def list_project_documents(self, project_id: str, user: AuthUser) -> list[ProjectDocumentSummary]:
+        """Return metadata for documents attached to a project the user can access."""
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        return project_document_service.list_project_documents(project_id=project_id, tenant_id=user.tenant_id)
+
+    def list_project_notes(self, project_id: str, user: AuthUser) -> list[ProjectNoteSummary]:
+        """Return notes attached to a project the user can access."""
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.list_project_notes(user.tenant_id, project_id)
+            except SQLAlchemyError:
+                pass
+        return []
+
+    def create_project_note(self, project_id: str, payload: ProjectNoteCreate, user: AuthUser) -> ProjectNoteSummary:
+        """Persist a note into a project workspace for an authorized user."""
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.create_project_note(
+                    project_id=project_id,
+                    tenant_id=user.tenant_id,
+                    author_name=user.full_name,
+                    content=payload.content.strip(),
+                )
+            except SQLAlchemyError:
+                pass
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Project note storage is not available.")
 
     def list_listings(self, user: AuthUser) -> list[ListingSummary]:
         """Return the current opportunity catalog."""
@@ -221,6 +279,50 @@ class PlatformService:
             except SQLAlchemyError:
                 pass
         return list(self._alerts)
+
+    def _build_project_activity(
+        self,
+        project: ProjectSummary,
+        documents: list[ProjectDocumentSummary],
+        notes: list[ProjectNoteSummary],
+    ) -> list[ProjectActivityItem]:
+        items = [
+            ProjectActivityItem(
+                id=f"activity-project-{project.id}",
+                activity_type="project_created",
+                title="Project initialized",
+                detail=f"{project.name} was created and assigned to {project.owner}.",
+                actor=project.owner,
+                occurred_at=project.created_at,
+            )
+        ]
+        items.extend(
+            ProjectActivityItem(
+                id=f"activity-document-{document.id}",
+                activity_type="document_uploaded",
+                title="Evidence uploaded",
+                detail=f"{document.file_name} was added to the project workspace.",
+                actor=document.uploaded_by,
+                occurred_at=document.uploaded_at,
+            )
+            for document in documents
+        )
+        items.extend(
+            ProjectActivityItem(
+                id=f"activity-note-{note.id}",
+                activity_type="note_added",
+                title="Project note added",
+                detail=note.content,
+                actor=note.author_name,
+                occurred_at=note.created_at,
+            )
+            for note in notes
+        )
+        return sorted(
+            items,
+            key=lambda item: item.occurred_at or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
+        )
 
 
 # Shared singleton for the API layer until dependency injection is introduced.

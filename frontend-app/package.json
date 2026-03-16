@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "author": "Ravi Kafley",
   "type": "module",
+  "engines": {
+    "node": ">=20 <25"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

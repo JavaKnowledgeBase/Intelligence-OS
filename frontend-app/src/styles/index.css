@@ -453,7 +453,8 @@ a {
 
 .architecture-content,
 .login-content,
-.about-content {
+.about-content,
+.projects-content {
   padding-top: 0;
 }
 
@@ -502,6 +503,242 @@ a {
 
 .about-panel {
   margin-bottom: 28px;
+}
+
+.projects-shell {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 20px;
+}
+
+.project-detail-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.projects-header-row,
+.project-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.projects-heading,
+.project-card h3 {
+  margin: 10px 0 12px;
+  font-family: "Source Serif 4", Georgia, serif;
+}
+
+.projects-grid,
+.project-meta-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.projects-grid {
+  margin-top: 22px;
+}
+
+.project-card {
+  padding: 22px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.project-card-top span,
+.project-meta-grid span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.project-card-top strong {
+  color: var(--accent-soft);
+}
+
+.project-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.project-meta-grid {
+  margin-top: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.project-card-actions {
+  margin-top: 18px;
+}
+
+.project-meta-grid strong {
+  display: block;
+  margin-top: 6px;
+  color: #eef4fb;
+}
+
+.project-form {
+  margin-top: 18px;
+}
+
+.project-side-stack {
+  margin-top: 24px;
+}
+
+.project-locked-panel {
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.upload-panel {
+  margin-top: 18px;
+  padding: 20px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.panel-note {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.project-summary-grid,
+.document-list,
+.note-list,
+.activity-list {
+  display: grid;
+  gap: 16px;
+}
+
+.project-summary-grid {
+  margin-top: 22px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.project-summary-card,
+.document-card,
+.note-card,
+.activity-card {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.project-summary-card span,
+.document-meta span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.project-summary-card strong {
+  display: block;
+  margin-top: 8px;
+  color: #eef4fb;
+  line-height: 1.5;
+}
+
+.project-summary-card-wide {
+  grid-column: 1 / -1;
+}
+
+.document-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.document-card strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.document-card p,
+.document-meta small,
+.note-card p,
+.activity-card p,
+.activity-card small {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.note-list,
+.activity-list {
+  margin-top: 20px;
+}
+
+.note-card strong,
+.activity-card strong {
+  display: block;
+  margin-bottom: 10px;
+  color: #eef4fb;
+}
+
+.activity-card small {
+  display: block;
+  margin-top: 12px;
+}
+
+.document-meta {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  text-align: right;
+}
+
+.document-excerpt {
+  margin-top: 10px !important;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.document-preview-panel {
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.document-preview-text {
+  margin: 16px 0 0;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(6, 12, 22, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #eef4fb;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Space Mono", "Consolas", monospace;
+  line-height: 1.6;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.upload-form {
+  margin-top: 16px;
 }
 
 .about-doc-grid {
@@ -730,6 +967,8 @@ a {
   .split-panel,
   .architecture-grid,
   .about-doc-grid,
+  .project-detail-grid,
+  .projects-shell,
   .login-shell,
   .highlight-strip {
     grid-template-columns: 1fr;

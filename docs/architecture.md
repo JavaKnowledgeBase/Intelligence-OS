@@ -16,10 +16,12 @@ Build one shared platform that can support:
 
 ## Current Foundation
 
-- React frontend for the investor dashboard and project workspace
-- FastAPI platform core for project, listing, ROI, market, search, and alert flows
+- React frontend for login, dashboard, architecture, about, and project workspace flows
+- FastAPI platform core for auth, project, listing, ROI, market, search, alert, and ingestion flows
 - placeholder microservices for forecast and valuation workloads
-- Docker Compose for local development
+- PostgreSQL-backed domain/auth storage with Alembic migrations
+- Redis-backed session persistence and rate limiting
+- Docker Compose for local development and Docker Desktop verification
 
 ## Target Service Map
 
@@ -39,3 +41,10 @@ Build one shared platform that can support:
 - object storage for files and extracted data
 - vector database for RAG retrieval
 - analytics warehouse for long-term reporting
+
+## Current Gaps To Build Next
+
+- project detail workspaces with documents, membership, and notes
+- external ingestion connectors beyond the local starter feed
+- Microsoft OAuth for enterprise identity federation
+- asynchronous workers for scheduled sync, scoring, and alert delivery

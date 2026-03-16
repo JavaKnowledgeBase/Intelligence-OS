@@ -8,7 +8,7 @@ import {
   requestAdminAccess,
   requestPasswordReset,
 } from "../api/authClient";
-import { WisdomTicker } from "../components/WisdomTicker";
+import { AuthShell } from "../components/AuthShell";
 
 const authModes = {
   signIn: "signIn",
@@ -353,66 +353,41 @@ export function LoginPage({ onLogin }) {
   }
 
   return (
-    <main className="content login-content">
-      <section className="login-shell">
-        <div className="login-panel login-panel-brand">
-          <p className="eyebrow">Secure enterprise access</p>
-          <h2>Welcome back to your investment command center, your return on investment advisor.</h2>
-          <div className="highlight-strip">
-            <div className="highlight-card">
-              <strong>Shared project model</strong>
-              <span>Retail, valuation, and ROI packs plug into one governed workspace.</span>
-            </div>
-            <div className="highlight-card">
-              <strong>Evidence-backed insights</strong>
-              <span>Deal ranking, market signals, and ROI logic stay aligned under one experience layer.</span>
-            </div>
-          </div>
-          <div className="pill-row">
-            <span className="pill">Investor</span>
-            <span className="pill">Analyst</span>
-            <span className="pill">Operator</span>
-            <span className="pill">Admin</span>
-          </div>
-          <WisdomTicker />
-        </div>
+    <AuthShell
+      title={
+        mode === authModes.signIn
+          ? "Sign in"
+          : mode === authModes.createAccount
+            ? "Create account"
+            : mode === authModes.forgotPassword
+              ? "Reset password"
+              : "Request admin access"
+      }
+      modeAction={
+        mode !== authModes.signIn ? (
+          <button type="button" className="text-button" onClick={() => switchMode(authModes.signIn)}>
+            Back to sign in
+          </button>
+        ) : null
+      }
+      footer={<p className="hint-text">Demo account: `ravi@torilaure.com` / `Torilaure123!`</p>}
+    >
+      {renderModeContent()}
 
-        <div className="login-panel login-panel-form">
-          <p className="panel-label">Developer: Ravi Kafley</p>
-          <div className="login-mode-header">
-            <h3>
-              {mode === authModes.signIn && "Sign in"}
-              {mode === authModes.createAccount && "Create account"}
-              {mode === authModes.forgotPassword && "Reset password"}
-              {mode === authModes.requestAdmin && "Request admin access"}
-            </h3>
-            {mode !== authModes.signIn ? (
-              <button type="button" className="text-button" onClick={() => switchMode(authModes.signIn)}>
-                Back to sign in
-              </button>
-            ) : null}
-          </div>
+      {errorMessage ? <p className="error-message">{errorMessage}</p> : null}
+      {infoMessage ? <p className="hint-text">{infoMessage}</p> : null}
 
-          {renderModeContent()}
-
-          {errorMessage ? <p className="error-message">{errorMessage}</p> : null}
-          {infoMessage ? <p className="hint-text">{infoMessage}</p> : null}
-
-          <div className="auth-links auth-links-under-button">
-            <button type="button" className="text-button" onClick={() => switchMode(authModes.signIn)}>
-              Sign in
-            </button>
-            <button type="button" className="text-button" onClick={() => switchMode(authModes.createAccount)}>
-              Create account
-            </button>
-            <button type="button" className="text-button" onClick={() => switchMode(authModes.requestAdmin)}>
-              Request admin access
-            </button>
-          </div>
-
-          <p className="hint-text">Demo account: `ravi@torilaure.com` / `Torilaure123!`</p>
-        </div>
-      </section>
-    </main>
+      <div className="auth-links auth-links-under-button">
+        <button type="button" className="text-button" onClick={() => switchMode(authModes.signIn)}>
+          Sign in
+        </button>
+        <button type="button" className="text-button" onClick={() => switchMode(authModes.createAccount)}>
+          Create account
+        </button>
+        <button type="button" className="text-button" onClick={() => switchMode(authModes.requestAdmin)}>
+          Request admin access
+        </button>
+      </div>
+    </AuthShell>
   );
 }

@@ -1,6 +1,10 @@
 import os
+from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseModel):
@@ -20,6 +24,11 @@ class Settings(BaseModel):
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     bootstrap_sample_data: bool = os.getenv("BOOTSTRAP_SAMPLE_DATA", "false").lower() == "true"
     bootstrap_auth_users: bool = os.getenv("BOOTSTRAP_AUTH_USERS", "true").lower() == "true"
+    project_document_dir: str = os.getenv(
+        "PROJECT_DOCUMENT_DIR",
+        str(BASE_DIR / "storage" / "project_documents"),
+    )
+    max_upload_size_bytes: int = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(25 * 1024 * 1024)))
 
 
 # Singleton settings object used across the backend.

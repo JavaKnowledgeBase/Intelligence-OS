@@ -9,6 +9,8 @@ import { AboutPage } from "./pages/AboutPage";
 import { ArchitecturePage } from "./pages/ArchitecturePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { ProjectDetailPage } from "./pages/ProjectDetailPage";
+import { ProjectsPage } from "./pages/ProjectsPage";
 
 function AppLayout() {
   const navigate = useNavigate();
@@ -80,6 +82,9 @@ function AppLayout() {
               <NavLink to="/dashboard" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
                 Dashboard
               </NavLink>
+              <NavLink to="/projects" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
+                Projects
+              </NavLink>
               <NavLink to="/architecture" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
                 Architecture
               </NavLink>
@@ -127,6 +132,22 @@ function AppLayout() {
           element={
             <ProtectedRoute isReady={authReady} isAuthenticated={signedIn}>
               <DashboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/projects"
+          element={
+            <ProtectedRoute isReady={authReady} isAuthenticated={signedIn}>
+              <ProjectsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/projects/:projectId"
+          element={
+            <ProtectedRoute isReady={authReady} isAuthenticated={signedIn}>
+              <ProjectDetailPage />
             </ProtectedRoute>
           }
         />

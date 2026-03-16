@@ -2,8 +2,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.alert import AlertPreference
+from app.schemas.document import ProjectDocumentSummary
 from app.schemas.listing import ListingSummary
 from app.schemas.market import MarketInsight
+from app.schemas.note import ProjectActivityItem, ProjectNoteSummary
 
 
 class ProjectCreate(BaseModel):
@@ -46,3 +49,15 @@ class PlatformOverview(BaseModel):
     average_deal_score: float
     featured_deals: list[ListingSummary]
     market_insights: list[MarketInsight]
+
+
+class ProjectWorkspace(BaseModel):
+    """Project detail payload that brings together the main workspace resources."""
+
+    project: ProjectSummary
+    listings: list[ListingSummary]
+    market_insights: list[MarketInsight]
+    alerts: list[AlertPreference]
+    documents: list[ProjectDocumentSummary]
+    notes: list[ProjectNoteSummary]
+    activity: list[ProjectActivityItem]
