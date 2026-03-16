@@ -22,8 +22,8 @@ export function LoginPage({ onLogin }) {
   const navigate = useNavigate();
   const [mode, setMode] = useState(authModes.signIn);
   const [signInForm, setSignInForm] = useState({
-    email: "ravi@torilaure.com",
-    password: "Torilaure123!",
+    email: "",
+    password: "",
   });
   const [createAccountForm, setCreateAccountForm] = useState({
     full_name: "",
@@ -311,7 +311,7 @@ export function LoginPage({ onLogin }) {
           Work email
           <input
             type="email"
-            placeholder="ravi@torilaure.com"
+            placeholder="name@company.com"
             value={signInForm.email}
             onChange={(event) => setSignInForm((current) => ({ ...current, email: event.target.value }))}
             autoComplete="email"
@@ -370,7 +370,7 @@ export function LoginPage({ onLogin }) {
           </button>
         ) : null
       }
-      footer={<p className="hint-text">Demo account: `ravi@torilaure.com` / `Torilaure123!`</p>}
+      footer={<p className="hint-text">Create a local account to sign in, or enable seeded test users only in private development environments.</p>}
     >
       {renderModeContent()}
 

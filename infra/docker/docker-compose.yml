@@ -4,9 +4,9 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: torilaure_security
-      POSTGRES_USER: torilaure
-      POSTGRES_PASSWORD: torilaure
+      POSTGRES_DB: ${POSTGRES_DB:-app_db}
+      POSTGRES_USER: ${POSTGRES_USER:-app_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local-dev}
     volumes:
       - torilaure-postgres-data:/var/lib/postgresql/data
 
@@ -19,9 +19,9 @@ services:
       context: ../../platform-core
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://torilaure:torilaure@postgres:5432/torilaure_security
-      REDIS_URL: redis://redis:6379/0
-      BOOTSTRAP_AUTH_USERS: "true"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://app_user:change-me-local-dev@postgres:5432/app_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      BOOTSTRAP_AUTH_USERS: "false"
       BOOTSTRAP_SAMPLE_DATA: "true"
     ports:
       - "8000:8000"

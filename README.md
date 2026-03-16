@@ -56,7 +56,7 @@ If your local machine already uses port `5432` or `6379`, override `DATABASE_URL
 
 The platform domain now uses PostgreSQL as its primary source of truth for projects, listings, market insights, and alert rules. Sample data is no longer loaded by default. If you want a demo bootstrap on a fresh local database, set `BOOTSTRAP_SAMPLE_DATA=true` before starting the backend.
 
-Authentication identities can also be bootstrapped for local development. `BOOTSTRAP_AUTH_USERS=true` seeds the starter users into the database, and their passwords remain stored as salted `scrypt` hashes rather than plaintext.
+Authentication identities can also be bootstrapped for local development. `BOOTSTRAP_AUTH_USERS=true` seeds starter users into the database, but it is disabled by default so demo credentials are not published in the repo.
 
 Refresh/session state is now designed for multi-instance deployments through Redis-backed session persistence. Refresh token rotation, logout invalidation, and active session checks are coordinated through Redis, with a local fallback used only if Redis is unavailable.
 
@@ -97,6 +97,12 @@ npm install
 npm run dev
 ```
 
+### Local Secrets Hygiene
+
+- Keep real credentials in untracked `.env` files only.
+- Install the local pre-commit guard with `powershell -ExecutionPolicy Bypass -File scripts/install_git_hooks.ps1`
+- Run `python scripts/scan_secrets.py` any time you want a quick repo scan before pushing.
+
 ### Docker Desktop
 
 ```bash
@@ -108,9 +114,9 @@ Local defaults:
 - Frontend: `http://localhost:5174`
 - Backend: `http://localhost:8000`
 
-Demo login:
-- `ravi@torilaure.com`
-- `Torilaure123!`
+Local login:
+- Use `Create account` in the UI to register a local user.
+- Enable `BOOTSTRAP_AUTH_USERS=true` only if you explicitly want seeded local test accounts.
 
 Implemented self-service auth:
 - create account
