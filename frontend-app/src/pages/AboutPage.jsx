@@ -99,6 +99,7 @@ export function AboutPage() {
           </article>
         ))}
       </section>
+
     </main>
   );
 }

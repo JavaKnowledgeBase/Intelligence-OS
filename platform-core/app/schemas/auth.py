@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr
 
 
@@ -80,6 +83,34 @@ class AuthAccessRequestResponse(BaseModel):
     request_id: str
     status: str
     message: str
+
+
+class AuthAccessRequestSummary(BaseModel):
+    """Admin-facing summary of an elevated access request."""
+
+    request_id: str
+    email: EmailStr
+    full_name: str
+    company_name: str
+    requested_role: str
+    reason: str
+    status: str
+    created_at: datetime | None = None
+
+
+class AuthAccessRequestReviewRequest(BaseModel):
+    """Review payload for approving or rejecting an access request."""
+
+    status: Literal["approved", "rejected"]
+
+
+class AuthAccessRequestReviewResponse(BaseModel):
+    """Review result returned after an admin processes an access request."""
+
+    request_id: str
+    status: str
+    message: str
+    granted_user_id: str | None = None
 
 
 class AuthPasswordResetRequest(BaseModel):

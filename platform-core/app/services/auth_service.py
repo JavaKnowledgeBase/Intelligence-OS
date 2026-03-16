@@ -12,7 +12,9 @@ from app.core.config import settings
 from app.models.auth_seed import AUTH_USERS
 from app.schemas.auth import (
     AuthAccessRequestCreate,
+    AuthAccessRequestReviewResponse,
     AuthAccessRequestResponse,
+    AuthAccessRequestSummary,
     AuthLoginRequest,
     AuthPasswordResetConfirmRequest,
     AuthPasswordResetRequest,
@@ -247,6 +249,33 @@ class AuthService:
     def request_admin_access(self, payload: AuthAccessRequestCreate) -> AuthAccessRequestResponse:
         """Persist an elevated access request for later review."""
         return user_storage_service.create_access_request(payload)
+
+    def list_access_requests(self, *, status_filter: str | None = None) -> list[AuthAccessRequestSummary]:
+        """Return access requests for admin review."""
+        return user_storage_service.list_access_requests(status_filter=status_filter)
+
+    def review_access_request(self, *, request_id: str, status: str) -> AuthAccessRequestReviewResponse:
+        """Approve or reject an access request and elevate an existing user when possible."""
+        review = user_storage_service.review_access_request(request_id=request_id, status=status)
+        if review is None:
+            raise ValueError("Access request not found.")
+
+        granted_user_id: str | None = None
+        message = f"Access request marked as {status}."
+        if status == "approved":
+            existing_user = user_storage_service.update_user_role(email=review.email, role=review.requested_role)
+            if existing_user is not None:
+                granted_user_id = existing_user["id"]
+                message = f"Access request approved and role updated to {review.requested_role}."
+            else:
+                message = "Access request approved. No existing user account matched that email yet."
+
+        return AuthAccessRequestReviewResponse(
+            request_id=review.request_id,
+            status=review.status,
+            message=message,
+            granted_user_id=granted_user_id,
+        )
 
     def request_password_reset(self, payload: AuthPasswordResetRequest) -> AuthPasswordResetResponse:
         """Create a one-time password reset token for a known user."""

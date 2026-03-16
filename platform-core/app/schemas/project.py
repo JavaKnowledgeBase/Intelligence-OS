@@ -1,8 +1,9 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.schemas.alert import AlertPreference
+from app.schemas.auth import AuthUser
 from app.schemas.document import ProjectDocumentSummary
 from app.schemas.listing import ListingSummary
 from app.schemas.market import MarketInsight
@@ -55,9 +56,16 @@ class ProjectWorkspace(BaseModel):
     """Project detail payload that brings together the main workspace resources."""
 
     project: ProjectSummary
+    members: list[AuthUser]
     listings: list[ListingSummary]
     market_insights: list[MarketInsight]
     alerts: list[AlertPreference]
     documents: list[ProjectDocumentSummary]
     notes: list[ProjectNoteSummary]
     activity: list[ProjectActivityItem]
+
+
+class ProjectMemberAdd(BaseModel):
+    """Payload for adding an existing tenant user to a project."""
+
+    email: EmailStr

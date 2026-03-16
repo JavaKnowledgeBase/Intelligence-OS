@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
 
 from app.api.deps import get_current_user
@@ -8,6 +8,7 @@ from app.schemas.note import ProjectNoteCreate, ProjectNoteSummary
 from app.schemas.project import (
     PlatformOverview,
     ProjectCreate,
+    ProjectMemberAdd,
     ProjectSummary,
     ProjectWorkspace,
 )
@@ -35,6 +36,33 @@ def get_platform_overview(current_user: AuthUser = Depends(get_current_user)) ->
 def get_project_workspace(project_id: str, current_user: AuthUser = Depends(get_current_user)) -> ProjectWorkspace:
     """Return the project detail workspace for an authorized caller."""
     return platform_service.get_project_workspace(project_id, current_user)
+
+
+@router.get("/{project_id}/members", response_model=list[AuthUser])
+def list_project_members(project_id: str, current_user: AuthUser = Depends(get_current_user)) -> list[AuthUser]:
+    """Return users currently attached to the project workspace."""
+    return platform_service.list_project_members(project_id, current_user)
+
+
+@router.post("/{project_id}/members", response_model=AuthUser, status_code=201)
+def add_project_member(
+    project_id: str,
+    payload: ProjectMemberAdd,
+    current_user: AuthUser = Depends(get_current_user),
+) -> AuthUser:
+    """Add an existing tenant user to a project."""
+    return platform_service.add_project_member(project_id, payload, current_user)
+
+
+@router.delete("/{project_id}/members/{member_user_id}", status_code=204)
+def remove_project_member(
+    project_id: str,
+    member_user_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> Response:
+    """Remove a member from the project workspace."""
+    platform_service.remove_project_member(project_id, member_user_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{project_id}/documents", response_model=list[ProjectDocumentSummary])

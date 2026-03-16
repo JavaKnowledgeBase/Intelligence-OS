@@ -13,10 +13,11 @@ from app.schemas.document import ProjectDocumentSummary
 from app.schemas.listing import DealSearchResponse, ListingCreate, ListingSummary
 from app.schemas.market import MarketInsight, MarketInsightCreate
 from app.schemas.note import ProjectActivityItem, ProjectNoteCreate, ProjectNoteSummary
-from app.schemas.project import PlatformOverview, ProjectCreate, ProjectSummary, ProjectWorkspace
+from app.schemas.project import PlatformOverview, ProjectCreate, ProjectMemberAdd, ProjectSummary, ProjectWorkspace
 from app.services.authorization_service import authorization_service
 from app.services.platform_storage_service import platform_storage_service
 from app.services.project_document_service import project_document_service
+from app.services.user_storage_service import user_storage_service
 
 
 class PlatformService:
@@ -76,6 +77,7 @@ class PlatformService:
         notes = self.list_project_notes(project_id, user)
         return ProjectWorkspace(
             project=project,
+            members=self.list_project_members(project_id, user),
             listings=listings,
             market_insights=self.get_market_insights(user),
             alerts=self.list_alerts(user),
@@ -119,6 +121,77 @@ class PlatformService:
             except SQLAlchemyError:
                 pass
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Project note storage is not available.")
+
+    def list_project_members(self, project_id: str, user: AuthUser) -> list[AuthUser]:
+        """Return users attached to a project that the caller can access."""
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.list_project_members(user.tenant_id, project_id)
+            except SQLAlchemyError:
+                pass
+        tenant_users = {item["id"]: item for item in user_storage_service.list_tenant_users(user.tenant_id)}
+        return [
+            AuthUser(
+                id=tenant_users[user_id]["id"],
+                email=tenant_users[user_id]["email"],
+                full_name=tenant_users[user_id]["full_name"],
+                role=tenant_users[user_id]["role"],
+                tenant_id=tenant_users[user_id]["tenant_id"],
+            )
+            for user_id in project.member_ids
+            if user_id in tenant_users
+        ]
+
+    def add_project_member(self, project_id: str, payload: ProjectMemberAdd, user: AuthUser) -> AuthUser:
+        """Add an existing tenant user to a project."""
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        authorization_service.require_project_management(user, project)
+        member = user_storage_service.find_by_email(payload.email)
+        if member is None or member["tenant_id"] != user.tenant_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant user not found for that email.")
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.add_project_member(
+                    project_id=project_id,
+                    tenant_id=user.tenant_id,
+                    user_id=member["id"],
+                )
+            except SQLAlchemyError:
+                pass
+        if member["id"] not in project.member_ids:
+            project.member_ids.append(member["id"])
+        return AuthUser(
+            id=member["id"],
+            email=member["email"],
+            full_name=member["full_name"],
+            role=member["role"],
+            tenant_id=member["tenant_id"],
+        )
+
+    def remove_project_member(self, project_id: str, member_user_id: str, user: AuthUser) -> None:
+        """Remove a non-owner member from a project."""
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        authorization_service.require_project_management(user, project)
+        if member_user_id == project.owner_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The project owner cannot be removed from membership.")
+        if platform_storage_service.is_available():
+            try:
+                removed = platform_storage_service.remove_project_member(project_id=project_id, user_id=member_user_id)
+            except SQLAlchemyError:
+                removed = False
+            if not removed:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project member not found.")
+            return
+        if member_user_id not in project.member_ids:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project member not found.")
+        project.member_ids = [user_id for user_id in project.member_ids if user_id != member_user_id]
 
     def list_listings(self, user: AuthUser) -> list[ListingSummary]:
         """Return the current opportunity catalog."""

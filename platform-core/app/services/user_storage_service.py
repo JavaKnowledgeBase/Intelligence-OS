@@ -15,6 +15,7 @@ from app.models.platform_tables import AccessRequestRecord, PasswordResetRecord,
 from app.schemas.auth import (
     AuthAccessRequestCreate,
     AuthAccessRequestResponse,
+    AuthAccessRequestSummary,
     AuthPasswordResetResponse,
     AuthRegisterRequest,
 )
@@ -80,6 +81,15 @@ class UserStorageService:
             records = session.scalars(select(UserRecord).order_by(UserRecord.email.asc())).all()
             return [self._to_user_dict(record) for record in records if record.is_active]
 
+    def list_tenant_users(self, tenant_id: str) -> list[dict[str, str]]:
+        with self.session_scope() as session:
+            records = session.scalars(
+                select(UserRecord)
+                .where(UserRecord.tenant_id == tenant_id, UserRecord.is_active.is_(True))
+                .order_by(UserRecord.full_name.asc(), UserRecord.email.asc())
+            ).all()
+            return [self._to_user_dict(record) for record in records]
+
     def create_user(
         self,
         payload: AuthRegisterRequest,
@@ -117,6 +127,17 @@ class UserStorageService:
             session.flush()
             return True
 
+    def update_user_role(self, *, email: str, role: str) -> dict[str, str] | None:
+        normalized_email = email.strip().lower()
+        with self.session_scope() as session:
+            record = session.scalar(select(UserRecord).where(UserRecord.email == normalized_email))
+            if record is None or not record.is_active:
+                return None
+            record.role = role.strip().lower()
+            session.flush()
+            session.refresh(record)
+            return self._to_user_dict(record)
+
     def create_access_request(self, payload: AuthAccessRequestCreate) -> AuthAccessRequestResponse:
         with self.session_scope() as session:
             record = AccessRequestRecord(
@@ -136,6 +157,24 @@ class UserStorageService:
                 status=record.status,
                 message="Admin access request submitted for review.",
             )
+
+    def list_access_requests(self, *, status_filter: str | None = None) -> list[AuthAccessRequestSummary]:
+        with self.session_scope() as session:
+            query = select(AccessRequestRecord).order_by(AccessRequestRecord.created_at.desc())
+            if status_filter is not None:
+                query = query.where(AccessRequestRecord.status == status_filter)
+            records = session.scalars(query).all()
+            return [self._to_access_request_summary(record) for record in records]
+
+    def review_access_request(self, *, request_id: str, status: str) -> AuthAccessRequestSummary | None:
+        with self.session_scope() as session:
+            record = session.scalar(select(AccessRequestRecord).where(AccessRequestRecord.id == request_id))
+            if record is None:
+                return None
+            record.status = status
+            session.flush()
+            session.refresh(record)
+            return self._to_access_request_summary(record)
 
     def create_password_reset(self, *, user: dict[str, str], reset_token: str, expires_at: datetime) -> AuthPasswordResetResponse:
         with self.session_scope() as session:
@@ -197,6 +236,18 @@ class UserStorageService:
             "role": record.role,
             "tenant_id": record.tenant_id,
         }
+
+    def _to_access_request_summary(self, record: AccessRequestRecord) -> AuthAccessRequestSummary:
+        return AuthAccessRequestSummary(
+            request_id=record.id,
+            email=record.email,
+            full_name=record.full_name,
+            company_name=record.company_name,
+            requested_role=record.requested_role,
+            reason=record.reason,
+            status=record.status,
+            created_at=record.created_at,
+        )
 
 
 user_storage_service = UserStorageService()

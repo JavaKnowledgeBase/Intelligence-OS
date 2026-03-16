@@ -18,6 +18,11 @@ export async function fetchProjectWorkspace(projectId) {
   return readJsonOrThrow(response, "Unable to load the project workspace.");
 }
 
+export async function fetchProjectMembers(projectId) {
+  const response = await authenticatedFetch(`/projects/${projectId}/members`);
+  return readJsonOrThrow(response, "Unable to load project members.");
+}
+
 export async function createProject(payload) {
   const response = await authenticatedFetch("/projects", {
     method: "POST",
@@ -28,6 +33,29 @@ export async function createProject(payload) {
   });
 
   return readJsonOrThrow(response, "Unable to create project.");
+}
+
+export async function addProjectMember(projectId, email) {
+  const response = await authenticatedFetch(`/projects/${projectId}/members`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ email }),
+  });
+
+  return readJsonOrThrow(response, "Unable to add the project member.");
+}
+
+export async function removeProjectMember(projectId, memberUserId) {
+  const response = await authenticatedFetch(`/projects/${projectId}/members/${memberUserId}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? "Unable to remove the project member.");
+  }
 }
 
 export async function uploadProjectDocument(projectId, file) {

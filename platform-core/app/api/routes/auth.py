@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Header, HTTPException, Request, Response, status
+from typing import Literal
 
-from app.api.deps import extract_bearer_token
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+
+from app.api.deps import extract_bearer_token, get_current_user
 from app.schemas.auth import (
     AuthAccessRequestCreate,
+    AuthAccessRequestReviewRequest,
+    AuthAccessRequestReviewResponse,
     AuthAccessRequestResponse,
+    AuthAccessRequestSummary,
     AuthLoginRequest,
     AuthLogoutRequest,
     AuthPasswordResetConfirmRequest,
@@ -16,6 +21,7 @@ from app.schemas.auth import (
 )
 from app.services.auth_service import auth_service
 from app.services.audit_service import audit_service
+from app.services.authorization_service import authorization_service
 from app.services.rate_limit_service import rate_limit_service
 from app.services.session_store_service import session_store_service
 
@@ -113,6 +119,47 @@ def request_admin_access(payload: AuthAccessRequestCreate, request: Request) -> 
         actor=payload.email.strip().lower(),
         ip_address=client_ip,
         detail=f"Requested role {payload.requested_role}.",
+    )
+    return response
+
+
+@router.get("/access-requests", response_model=list[AuthAccessRequestSummary])
+def list_access_requests(
+    status_filter: Literal["pending", "approved", "rejected"] | None = Query(default=None, alias="status"),
+    current_user: AuthUser = Depends(get_current_user),
+) -> list[AuthAccessRequestSummary]:
+    """Return submitted access requests for admin review."""
+    authorization_service.require_admin(current_user)
+    return auth_service.list_access_requests(status_filter=status_filter)
+
+
+@router.patch("/access-requests/{request_id}", response_model=AuthAccessRequestReviewResponse)
+def review_access_request(
+    request_id: str,
+    payload: AuthAccessRequestReviewRequest,
+    request: Request,
+    current_user: AuthUser = Depends(get_current_user),
+) -> AuthAccessRequestReviewResponse:
+    """Approve or reject an access request as an admin."""
+    authorization_service.require_admin(current_user)
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        response = auth_service.review_access_request(request_id=request_id, status=payload.status)
+    except ValueError as error:
+        audit_service.record(
+            event_type="auth.access_request.review",
+            outcome="failure",
+            actor=current_user.email,
+            ip_address=client_ip,
+            detail=str(error),
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    audit_service.record(
+        event_type="auth.access_request.review",
+        outcome="success",
+        actor=current_user.email,
+        ip_address=client_ip,
+        detail=f"Marked {request_id} as {payload.status}.",
     )
     return response
 

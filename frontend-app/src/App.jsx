@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { fetchAccessRequests } from "./api/adminClient";
 import { clearSession, getSession, isAuthenticated, setSession, updateSessionUser } from "./auth";
 import { fetchCurrentUser, refreshWithToken } from "./api/authClient";
 import { logoutSession } from "./api/sessionClient";
 import { BrandMark } from "./components/BrandMark";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AboutPage } from "./pages/AboutPage";
+import { AdminPage } from "./pages/AdminPage";
 import { ArchitecturePage } from "./pages/ArchitecturePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -16,6 +18,7 @@ function AppLayout() {
   const navigate = useNavigate();
   const [session, setSessionState] = useState(() => getSession());
   const [authReady, setAuthReady] = useState(false);
+  const [pendingAccessRequestCount, setPendingAccessRequestCount] = useState(0);
   const signedIn = Boolean(session?.access_token && session?.user) && isAuthenticated();
 
   useEffect(() => {
@@ -69,6 +72,35 @@ function AppLayout() {
     };
   }, []);
 
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadPendingAccessRequests() {
+      if (session?.user?.role !== "admin") {
+        if (!ignore) {
+          setPendingAccessRequestCount(0);
+        }
+        return;
+      }
+
+      try {
+        const requests = await fetchAccessRequests("pending");
+        if (!ignore) {
+          setPendingAccessRequestCount(requests.length);
+        }
+      } catch {
+        if (!ignore) {
+          setPendingAccessRequestCount(0);
+        }
+      }
+    }
+
+    loadPendingAccessRequests();
+    return () => {
+      ignore = true;
+    };
+  }, [session?.user?.role]);
+
   return (
     <div className="app-shell">
       <div className="page-orb page-orb-left" />
@@ -88,6 +120,12 @@ function AppLayout() {
               <NavLink to="/architecture" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
                 Architecture
               </NavLink>
+              {session?.user?.role === "admin" ? (
+                <NavLink to="/admin" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
+                  Admin
+                  {pendingAccessRequestCount > 0 ? <span className="nav-pill-badge">{pendingAccessRequestCount}</span> : null}
+                </NavLink>
+              ) : null}
               <NavLink to="/about" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
                 About
               </NavLink>
@@ -156,6 +194,14 @@ function AppLayout() {
           element={
             <ProtectedRoute isReady={authReady} isAuthenticated={signedIn}>
               <ArchitecturePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute isReady={authReady} isAuthenticated={signedIn}>
+              <AdminPage />
             </ProtectedRoute>
           }
         />

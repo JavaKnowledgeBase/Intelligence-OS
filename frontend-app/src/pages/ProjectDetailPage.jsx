@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { getSession } from "../auth";
 import {
+  addProjectMember,
   createProjectNote,
   downloadProjectDocument,
   fetchProjectDocumentPreview,
+  fetchProjectMembers,
   fetchProjectWorkspace,
+  removeProjectMember,
   uploadProjectDocument,
 } from "../api/projectClient";
 import { logoutSession } from "../api/sessionClient";
@@ -44,11 +48,15 @@ function formatFileSize(bytes) {
 export function ProjectDetailPage() {
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const session = getSession();
+  const currentUserId = session?.user?.id;
   const [workspace, setWorkspace] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isSavingMember, setIsSavingMember] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [noteContent, setNoteContent] = useState("");
+  const [memberEmail, setMemberEmail] = useState("");
   const [previewState, setPreviewState] = useState({ title: "", text: "", isLoading: false, isOpen: false });
 
   useEffect(() => {
@@ -64,6 +72,11 @@ export function ProjectDetailPage() {
           return;
         }
         setWorkspace(data);
+        const members = await fetchProjectMembers(projectId);
+        if (!isMounted) {
+          return;
+        }
+        setWorkspace((current) => ({ ...(current ?? data), members }));
       } catch (error) {
         if (!isMounted) {
           return;
@@ -147,6 +160,59 @@ export function ProjectDetailPage() {
       setIsSavingNote(false);
     }
   }
+
+  async function handleAddMember(event) {
+    event.preventDefault();
+    if (!memberEmail.trim()) {
+      setErrorMessage("Enter an email to add a collaborator.");
+      return;
+    }
+
+    try {
+      setIsSavingMember(true);
+      setErrorMessage("");
+      const member = await addProjectMember(projectId, memberEmail.trim());
+      setWorkspace((current) => {
+        if (!current) {
+          return current;
+        }
+        const existing = current.members?.some((item) => item.id === member.id);
+        return {
+          ...current,
+          members: existing ? current.members : [...(current.members ?? []), member],
+        };
+      });
+      setMemberEmail("");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to add the project member.");
+    } finally {
+      setIsSavingMember(false);
+    }
+  }
+
+  async function handleRemoveMember(memberUserId) {
+    try {
+      setErrorMessage("");
+      await removeProjectMember(projectId, memberUserId);
+      setWorkspace((current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          ...current,
+          members: (current.members ?? []).filter((item) => item.id !== memberUserId),
+        };
+      });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to remove the project member.");
+    }
+  }
+
+  const canManageMembers = Boolean(
+    workspace?.project &&
+      session?.user &&
+      (session.user.role === "admin" || session.user.role === "analyst" || workspace.project.owner_id === currentUserId),
+  );
 
   async function handlePreviewDocument(document) {
     try {
@@ -324,6 +390,47 @@ export function ProjectDetailPage() {
       </section>
 
       <section className="split-panel">
+        <div className="glass-card">
+          <SectionTitle
+            eyebrow="Collaboration"
+            title="Project members"
+            description="Keep the working team visible so project access, context, and accountability stay clear."
+          />
+          {canManageMembers ? (
+            <form className="login-form project-form" onSubmit={handleAddMember}>
+              <label>
+                Add teammate by email
+                <input
+                  type="email"
+                  value={memberEmail}
+                  onChange={(event) => setMemberEmail(event.target.value)}
+                  placeholder="name@company.com"
+                />
+              </label>
+              <button type="submit" className="ghost-button login-submit" disabled={isSavingMember}>
+                {isSavingMember ? "Adding member..." : "Add member"}
+              </button>
+            </form>
+          ) : null}
+          <div className="member-list">
+            {(workspace?.members ?? []).map((member) => (
+              <article key={member.id} className="member-card">
+                <div>
+                  <strong>{member.full_name}</strong>
+                  <p>{member.email}</p>
+                  <small>{member.role}</small>
+                </div>
+                {canManageMembers && member.id !== workspace?.project?.owner_id ? (
+                  <button type="button" className="text-button" onClick={() => handleRemoveMember(member.id)}>
+                    Remove
+                  </button>
+                ) : null}
+              </article>
+            ))}
+            {!workspace?.members?.length && !isLoading ? <p className="hint-text">No project members are attached yet.</p> : null}
+          </div>
+        </div>
+
         <div className="glass-card">
           <SectionTitle
             eyebrow="Signals"

@@ -191,12 +191,29 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--text-muted);
   padding: 10px 14px;
   font-weight: 700;
+}
+
+.nav-pill-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(240, 177, 95, 0.18);
+  border: 1px solid rgba(240, 177, 95, 0.28);
+  color: var(--accent-soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .nav-pill-active {
@@ -505,6 +522,10 @@ a {
   margin-bottom: 28px;
 }
 
+.admin-overview-grid {
+  margin-bottom: 0;
+}
+
 .projects-shell {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
@@ -623,7 +644,9 @@ a {
 .project-summary-grid,
 .document-list,
 .note-list,
-.activity-list {
+.activity-list,
+.member-list,
+.admin-request-list {
   display: grid;
   gap: 16px;
 }
@@ -636,7 +659,9 @@ a {
 .project-summary-card,
 .document-card,
 .note-card,
-.activity-card {
+.activity-card,
+.member-card,
+.admin-request-card {
   padding: 18px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.035);
@@ -669,6 +694,14 @@ a {
   align-items: start;
 }
 
+.member-card,
+.admin-request-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: start;
+}
+
 .document-card strong {
   display: block;
   margin-bottom: 6px;
@@ -678,7 +711,11 @@ a {
 .document-meta small,
 .note-card p,
 .activity-card p,
-.activity-card small {
+.activity-card small,
+.member-card p,
+.member-card small,
+.admin-request-card p,
+.admin-request-card small {
   margin: 0;
   color: var(--text-muted);
   line-height: 1.5;
@@ -706,6 +743,31 @@ a {
   gap: 8px;
   justify-items: end;
   text-align: right;
+}
+
+.member-list,
+.admin-request-list {
+  margin-top: 20px;
+}
+
+.member-card strong,
+.admin-request-card strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #eef4fb;
+}
+
+.admin-request-side {
+  display: grid;
+  gap: 12px;
+  justify-items: end;
+  text-align: right;
+}
+
+.admin-request-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .document-excerpt {

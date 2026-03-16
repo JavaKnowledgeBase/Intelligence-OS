@@ -20,9 +20,11 @@ from app.models.platform_tables import (
     ProjectMemberRecord,
     ProjectNoteRecord,
     ProjectRecord,
+    UserRecord,
 )
 from app.models.seed_data import ALERTS, LISTINGS, MARKET_INSIGHTS, PROJECTS
 from app.schemas.alert import AlertPreference, AlertPreferenceCreate
+from app.schemas.auth import AuthUser
 from app.schemas.document import ProjectDocumentSummary
 from app.schemas.ingestion import IngestionRunSummary
 from app.schemas.listing import ListingCreate, ListingSummary
@@ -121,6 +123,56 @@ class PlatformStorageService:
             session.flush()
             session.refresh(record)
             return self._to_project_summary(record)
+
+    def list_project_members(self, tenant_id: str, project_id: str) -> list[AuthUser]:
+        with self.session_scope() as session:
+            records = session.scalars(
+                select(UserRecord)
+                .join(ProjectMemberRecord, ProjectMemberRecord.user_id == UserRecord.id)
+                .where(
+                    ProjectMemberRecord.project_id == project_id,
+                    UserRecord.tenant_id == tenant_id,
+                    UserRecord.is_active.is_(True),
+                )
+                .order_by(UserRecord.full_name.asc(), UserRecord.email.asc())
+            ).all()
+            return [self._to_auth_user(record) for record in records]
+
+    def add_project_member(self, *, project_id: str, tenant_id: str, user_id: str) -> AuthUser:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(UserRecord).where(
+                    UserRecord.id == user_id,
+                    UserRecord.tenant_id == tenant_id,
+                    UserRecord.is_active.is_(True),
+                )
+            )
+            if record is None:
+                raise ValueError("User not found for this tenant.")
+            existing = session.scalar(
+                select(ProjectMemberRecord).where(
+                    ProjectMemberRecord.project_id == project_id,
+                    ProjectMemberRecord.user_id == user_id,
+                )
+            )
+            if existing is None:
+                session.add(ProjectMemberRecord(project_id=project_id, user_id=user_id))
+                session.flush()
+            return self._to_auth_user(record)
+
+    def remove_project_member(self, *, project_id: str, user_id: str) -> bool:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(ProjectMemberRecord).where(
+                    ProjectMemberRecord.project_id == project_id,
+                    ProjectMemberRecord.user_id == user_id,
+                )
+            )
+            if record is None:
+                return False
+            session.delete(record)
+            session.flush()
+            return True
 
     def list_project_documents(self, tenant_id: str, project_id: str) -> list[ProjectDocumentSummary]:
         with self.session_scope() as session:
@@ -528,6 +580,15 @@ class PlatformStorageService:
             author_name=record.author_name,
             content=record.content,
             created_at=record.created_at,
+        )
+
+    def _to_auth_user(self, record: UserRecord) -> AuthUser:
+        return AuthUser(
+            id=record.id,
+            email=record.email,
+            full_name=record.full_name,
+            role=record.role,
+            tenant_id=record.tenant_id,
         )
 
 
