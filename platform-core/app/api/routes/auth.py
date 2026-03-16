@@ -1,7 +1,19 @@
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 
 from app.api.deps import extract_bearer_token
-from app.schemas.auth import AuthLoginRequest, AuthLogoutRequest, AuthRefreshRequest, AuthSession, AuthUser
+from app.schemas.auth import (
+    AuthAccessRequestCreate,
+    AuthAccessRequestResponse,
+    AuthLoginRequest,
+    AuthLogoutRequest,
+    AuthPasswordResetConfirmRequest,
+    AuthPasswordResetRequest,
+    AuthPasswordResetResponse,
+    AuthRefreshRequest,
+    AuthRegisterRequest,
+    AuthSession,
+    AuthUser,
+)
 from app.services.auth_service import auth_service
 from app.services.audit_service import audit_service
 from app.services.rate_limit_service import rate_limit_service
@@ -63,6 +75,86 @@ def login(payload: AuthLoginRequest, request: Request) -> AuthSession:
         detail=f"Authenticated as role {session.user.role}.",
     )
     return session
+
+
+@router.post("/register", response_model=AuthSession, status_code=201)
+def register(payload: AuthRegisterRequest, request: Request) -> AuthSession:
+    """Create a starter self-serve account and return a signed-in session."""
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        session = auth_service.register(payload)
+    except ValueError as error:
+        audit_service.record(
+            event_type="auth.register",
+            outcome="failure",
+            actor=payload.email.strip().lower(),
+            ip_address=client_ip,
+            detail=str(error),
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    audit_service.record(
+        event_type="auth.register",
+        outcome="success",
+        actor=session.user.email,
+        ip_address=client_ip,
+        detail="Self-serve account created.",
+    )
+    return session
+
+
+@router.post("/request-admin-access", response_model=AuthAccessRequestResponse, status_code=201)
+def request_admin_access(payload: AuthAccessRequestCreate, request: Request) -> AuthAccessRequestResponse:
+    """Store a request for admin review from the login page."""
+    client_ip = request.client.host if request.client else "unknown"
+    response = auth_service.request_admin_access(payload)
+    audit_service.record(
+        event_type="auth.request_admin_access",
+        outcome="success",
+        actor=payload.email.strip().lower(),
+        ip_address=client_ip,
+        detail=f"Requested role {payload.requested_role}.",
+    )
+    return response
+
+
+@router.post("/password-reset/request", response_model=AuthPasswordResetResponse)
+def request_password_reset(payload: AuthPasswordResetRequest, request: Request) -> AuthPasswordResetResponse:
+    """Issue a one-time reset token for starter local testing."""
+    client_ip = request.client.host if request.client else "unknown"
+    response = auth_service.request_password_reset(payload)
+    audit_service.record(
+        event_type="auth.password_reset.request",
+        outcome="success",
+        actor=payload.email.strip().lower(),
+        ip_address=client_ip,
+        detail="Password reset token requested.",
+    )
+    return response
+
+
+@router.post("/password-reset/confirm", response_model=AuthPasswordResetResponse)
+def confirm_password_reset(payload: AuthPasswordResetConfirmRequest, request: Request) -> AuthPasswordResetResponse:
+    """Reset a password with a one-time token."""
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        response = auth_service.confirm_password_reset(payload)
+    except ValueError as error:
+        audit_service.record(
+            event_type="auth.password_reset.confirm",
+            outcome="failure",
+            actor=payload.email.strip().lower(),
+            ip_address=client_ip,
+            detail=str(error),
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    audit_service.record(
+        event_type="auth.password_reset.confirm",
+        outcome="success",
+        actor=payload.email.strip().lower(),
+        ip_address=client_ip,
+        detail="Password reset completed.",
+    )
+    return response
 
 
 @router.get("/me", response_model=AuthUser)

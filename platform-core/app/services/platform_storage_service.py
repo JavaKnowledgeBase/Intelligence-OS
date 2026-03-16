@@ -329,6 +329,8 @@ class PlatformStorageService:
                         members=[ProjectMemberRecord(user_id=user_id) for user_id in item["member_ids"]],
                     )
                 )
+            # Flush projects before dependent listings so FK-backed seeds load correctly.
+            session.flush()
         if session.scalar(select(ListingRecord.id).limit(1)) is None:
             for item in LISTINGS:
                 session.add(ListingRecord(**item))

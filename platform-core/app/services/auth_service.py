@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -10,7 +11,13 @@ import jwt
 from app.core.config import settings
 from app.models.auth_seed import AUTH_USERS
 from app.schemas.auth import (
+    AuthAccessRequestCreate,
+    AuthAccessRequestResponse,
     AuthLoginRequest,
+    AuthPasswordResetConfirmRequest,
+    AuthPasswordResetRequest,
+    AuthPasswordResetResponse,
+    AuthRegisterRequest,
     AuthSession,
     AuthTokenPayload,
     AuthUser,
@@ -58,6 +65,27 @@ class AuthService:
             p=1,
         ).hex()
         return hmac.compare_digest(candidate_hash, expected_hash)
+
+    def _hash_password(self, password: str) -> str:
+        salt = uuid4().hex[:32]
+        password_hash = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=bytes.fromhex(salt),
+            n=2**14,
+            r=8,
+            p=1,
+        ).hex()
+        return f"{salt}:{password_hash}"
+
+    def _validate_password_strength(self, password: str) -> None:
+        if len(password) < 10:
+            raise ValueError("Password must be at least 10 characters long.")
+        if not re.search(r"[A-Z]", password):
+            raise ValueError("Password must include at least one uppercase letter.")
+        if not re.search(r"[a-z]", password):
+            raise ValueError("Password must include at least one lowercase letter.")
+        if not re.search(r"\d", password):
+            raise ValueError("Password must include at least one number.")
 
     def _build_user(self, user: dict[str, str]) -> AuthUser:
         return AuthUser(
@@ -204,6 +232,42 @@ class AuthService:
             expires_in=settings.access_token_expire_seconds,
             user=auth_user,
         )
+
+    def register(self, payload: AuthRegisterRequest) -> AuthSession:
+        """Create a starter self-serve account and immediately sign the user in."""
+        self._validate_password_strength(payload.password)
+        tenant_slug = re.sub(r"[^a-z0-9]+", "-", payload.company_name.strip().lower()).strip("-") or "workspace"
+        user = user_storage_service.create_user(
+            payload,
+            password_hash=self._hash_password(payload.password),
+            tenant_id=f"tenant-{tenant_slug}",
+        )
+        return self.login(AuthLoginRequest(email=user["email"], password=payload.password))  # type: ignore[arg-type]
+
+    def request_admin_access(self, payload: AuthAccessRequestCreate) -> AuthAccessRequestResponse:
+        """Persist an elevated access request for later review."""
+        return user_storage_service.create_access_request(payload)
+
+    def request_password_reset(self, payload: AuthPasswordResetRequest) -> AuthPasswordResetResponse:
+        """Create a one-time password reset token for a known user."""
+        user = self._find_user_by_email(payload.email)
+        if user is None:
+            return AuthPasswordResetResponse(message="If the account exists, a reset token has been issued for testing.")
+        reset_token = uuid4().hex
+        expires_at = datetime.now(UTC) + timedelta(minutes=15)
+        return user_storage_service.create_password_reset(user=user, reset_token=reset_token, expires_at=expires_at)
+
+    def confirm_password_reset(self, payload: AuthPasswordResetConfirmRequest) -> AuthPasswordResetResponse:
+        """Reset a known account password using a one-time token."""
+        self._validate_password_strength(payload.new_password)
+        if not user_storage_service.consume_password_reset(email=payload.email, reset_token=payload.reset_token):
+            raise ValueError("Invalid or expired reset token.")
+        if not user_storage_service.update_password(
+            email=payload.email,
+            new_password_hash=self._hash_password(payload.new_password),
+        ):
+            raise ValueError("Unable to update password for that account.")
+        return AuthPasswordResetResponse(message="Password updated successfully. You can sign in with the new password.")
 
 
 auth_service = AuthService()

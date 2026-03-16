@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager, suppress
+from datetime import UTC, datetime
+from uuid import uuid4
 
 from sqlalchemy import inspect, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -9,7 +11,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.config import settings
 from app.core.database import SessionLocal, engine
 from app.models.auth_seed import AUTH_USERS
-from app.models.platform_tables import UserRecord
+from app.models.platform_tables import AccessRequestRecord, PasswordResetRecord, UserRecord
+from app.schemas.auth import (
+    AuthAccessRequestCreate,
+    AuthAccessRequestResponse,
+    AuthPasswordResetResponse,
+    AuthRegisterRequest,
+)
 
 
 logger = logging.getLogger("torilaure.identity.persistence")
@@ -25,8 +33,9 @@ class UserStorageService:
     def initialize(self) -> None:
         try:
             inspector = inspect(engine)
-            if "users" not in inspector.get_table_names():
-                raise SQLAlchemyError("User table is missing. Run `alembic upgrade head`.")
+            required_tables = {"users", "access_requests", "password_reset_requests"}
+            if not required_tables.issubset(set(inspector.get_table_names())):
+                raise SQLAlchemyError("Identity tables are missing. Run `alembic upgrade head`.")
             if settings.bootstrap_auth_users:
                 with self.session_scope() as session:
                     self._seed_if_empty(session)
@@ -70,6 +79,109 @@ class UserStorageService:
         with self.session_scope() as session:
             records = session.scalars(select(UserRecord).order_by(UserRecord.email.asc())).all()
             return [self._to_user_dict(record) for record in records if record.is_active]
+
+    def create_user(
+        self,
+        payload: AuthRegisterRequest,
+        *,
+        password_hash: str,
+        tenant_id: str,
+        role: str = "investor",
+    ) -> dict[str, str]:
+        normalized_email = payload.email.strip().lower()
+        with self.session_scope() as session:
+            existing = session.scalar(select(UserRecord).where(UserRecord.email == normalized_email))
+            if existing is not None:
+                raise ValueError("An account with that email already exists.")
+            record = UserRecord(
+                id=f"user-{uuid4().hex[:12]}",
+                email=normalized_email,
+                password_hash=password_hash,
+                full_name=payload.full_name.strip(),
+                role=role,
+                tenant_id=tenant_id,
+                is_active=True,
+            )
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return self._to_user_dict(record)
+
+    def update_password(self, *, email: str, new_password_hash: str) -> bool:
+        normalized_email = email.strip().lower()
+        with self.session_scope() as session:
+            record = session.scalar(select(UserRecord).where(UserRecord.email == normalized_email))
+            if record is None or not record.is_active:
+                return False
+            record.password_hash = new_password_hash
+            session.flush()
+            return True
+
+    def create_access_request(self, payload: AuthAccessRequestCreate) -> AuthAccessRequestResponse:
+        with self.session_scope() as session:
+            record = AccessRequestRecord(
+                id=f"access-{uuid4().hex[:12]}",
+                email=payload.email.strip().lower(),
+                full_name=payload.full_name.strip(),
+                company_name=payload.company_name.strip(),
+                requested_role=payload.requested_role.strip().lower(),
+                reason=payload.reason.strip(),
+                status="pending",
+            )
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return AuthAccessRequestResponse(
+                request_id=record.id,
+                status=record.status,
+                message="Admin access request submitted for review.",
+            )
+
+    def create_password_reset(self, *, user: dict[str, str], reset_token: str, expires_at: datetime) -> AuthPasswordResetResponse:
+        with self.session_scope() as session:
+            existing_records = session.scalars(
+                select(PasswordResetRecord).where(
+                    PasswordResetRecord.email == user["email"],
+                    PasswordResetRecord.consumed_at.is_(None),
+                )
+            ).all()
+            for record in existing_records:
+                record.consumed_at = datetime.now(UTC)
+
+            record = PasswordResetRecord(
+                id=f"reset-{uuid4().hex[:12]}",
+                user_id=user["id"],
+                email=user["email"],
+                reset_token=reset_token,
+                expires_at=expires_at,
+            )
+            session.add(record)
+            session.flush()
+            return AuthPasswordResetResponse(
+                message="Password reset token generated for testing.",
+                reset_token=reset_token,
+            )
+
+    def consume_password_reset(self, *, email: str, reset_token: str) -> bool:
+        normalized_email = email.strip().lower()
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(PasswordResetRecord).where(
+                    PasswordResetRecord.email == normalized_email,
+                    PasswordResetRecord.reset_token == reset_token,
+                    PasswordResetRecord.consumed_at.is_(None),
+                )
+            )
+            if record is None:
+                return False
+            expires_at = record.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at <= datetime.now(UTC):
+                return False
+            record.consumed_at = datetime.now(UTC)
+            session.flush()
+            return True
 
     def _seed_if_empty(self, session) -> None:
         if session.scalar(select(UserRecord.id).limit(1)) is None:

@@ -32,7 +32,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -451,7 +452,8 @@ a {
 }
 
 .architecture-content,
-.login-content {
+.login-content,
+.about-content {
   padding-top: 0;
 }
 
@@ -496,6 +498,46 @@ a {
 .architecture-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 28px;
+}
+
+.about-panel {
+  margin-bottom: 28px;
+}
+
+.about-doc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.about-doc-card h3 {
+  margin: 14px 0 10px;
+  font-family: "Source Serif 4", Georgia, serif;
+  font-size: 1.35rem;
+}
+
+.about-doc-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.about-doc-path {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.about-doc-path strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.about-doc-path code {
+  color: var(--accent-soft);
+  word-break: break-word;
 }
 
 .architecture-card {
@@ -566,6 +608,11 @@ a {
   margin-top: 18px;
 }
 
+.login-form-stack {
+  display: grid;
+  gap: 14px;
+}
+
 .login-form label {
   display: grid;
   gap: 8px;
@@ -587,6 +634,34 @@ a {
   outline: none;
   border-color: rgba(127, 212, 196, 0.45);
   box-shadow: 0 0 0 4px rgba(127, 212, 196, 0.12);
+}
+
+.login-textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f4f6fb;
+  resize: vertical;
+  min-height: 110px;
+}
+
+.login-textarea:focus {
+  outline: none;
+  border-color: rgba(127, 212, 196, 0.45);
+  box-shadow: 0 0 0 4px rgba(127, 212, 196, 0.12);
+}
+
+.login-mode-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.auth-mode-links {
+  margin-top: 10px;
 }
 
 .checkbox-row {
@@ -620,7 +695,20 @@ a {
 }
 
 .auth-links-under-button {
-  margin-top: 14px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 16px;
+}
+
+.auth-links-under-button .text-button {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.auth-links-under-button .text-button:hover {
+  color: var(--accent-soft);
 }
 
 .error-message {
@@ -641,6 +729,7 @@ a {
   .deal-grid,
   .split-panel,
   .architecture-grid,
+  .about-doc-grid,
   .login-shell,
   .highlight-strip {
     grid-template-columns: 1fr;

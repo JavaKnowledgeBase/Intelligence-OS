@@ -53,3 +53,51 @@ class AuthLogoutRequest(BaseModel):
     """Optional refresh token payload used to revoke the current session."""
 
     refresh_token: str | None = None
+
+
+class AuthRegisterRequest(BaseModel):
+    """Self-serve account creation payload for the starter template."""
+
+    full_name: str
+    email: EmailStr
+    password: str
+    company_name: str
+
+
+class AuthAccessRequestCreate(BaseModel):
+    """Request elevated admin access from the login page."""
+
+    full_name: str
+    email: EmailStr
+    company_name: str
+    requested_role: str = "admin"
+    reason: str
+
+
+class AuthAccessRequestResponse(BaseModel):
+    """Stored admin-access request summary returned to the UI."""
+
+    request_id: str
+    status: str
+    message: str
+
+
+class AuthPasswordResetRequest(BaseModel):
+    """Request a one-time password reset token for a known email."""
+
+    email: EmailStr
+
+
+class AuthPasswordResetConfirmRequest(BaseModel):
+    """Reset a password using the issued one-time token."""
+
+    email: EmailStr
+    reset_token: str
+    new_password: str
+
+
+class AuthPasswordResetResponse(BaseModel):
+    """Password-reset response payload used by the starter UI."""
+
+    message: str
+    reset_token: str | None = None

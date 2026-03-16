@@ -1,4 +1,4 @@
-version: "3.9"
+name: intelligence-os
 
 services:
   postgres:
@@ -7,41 +7,35 @@ services:
       POSTGRES_DB: torilaure_security
       POSTGRES_USER: torilaure
       POSTGRES_PASSWORD: torilaure
-    ports:
-      - "5432:5432"
     volumes:
       - torilaure-postgres-data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
 
-  # Runs the FastAPI platform core in a simple live-mounted development container.
   platform-core:
-    image: python:3.12-slim
-    working_dir: /app
-    volumes:
-      - ../../platform-core:/app
+    image: 7nepalithito/intelligence-os-platform-core:latest
+    build:
+      context: ../../platform-core
+      dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://torilaure:torilaure@postgres:5432/torilaure_security
       REDIS_URL: redis://redis:6379/0
-    command: sh -c "pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      BOOTSTRAP_AUTH_USERS: "true"
+      BOOTSTRAP_SAMPLE_DATA: "true"
     ports:
       - "8000:8000"
     depends_on:
       - postgres
       - redis
 
-  # Runs the React/Vite frontend and points it at the local backend stack.
   frontend-app:
-    image: node:22-alpine
-    working_dir: /app
-    volumes:
-      - ../../frontend-app:/app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5174"
+    image: 7nepalithito/intelligence-os-frontend-app:latest
+    build:
+      context: ../../frontend-app
+      dockerfile: Dockerfile
     ports:
-      - "5174:5174"
+      - "5174:80"
     depends_on:
       - platform-core
 

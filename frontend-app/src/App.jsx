@@ -5,6 +5,7 @@ import { fetchCurrentUser, refreshWithToken } from "./api/authClient";
 import { logoutSession } from "./api/sessionClient";
 import { BrandMark } from "./components/BrandMark";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { AboutPage } from "./pages/AboutPage";
 import { ArchitecturePage } from "./pages/ArchitecturePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -82,6 +83,9 @@ function AppLayout() {
               <NavLink to="/architecture" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
                 Architecture
               </NavLink>
+              <NavLink to="/about" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
+                About
+              </NavLink>
               <NavLink to="/login" className={({ isActive }) => `nav-pill ${isActive ? "nav-pill-active" : ""}`}>
                 Login
               </NavLink>
@@ -131,6 +135,14 @@ function AppLayout() {
           element={
             <ProtectedRoute isReady={authReady} isAuthenticated={signedIn}>
               <ArchitecturePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/about"
+          element={
+            <ProtectedRoute isReady={authReady} isAuthenticated={signedIn}>
+              <AboutPage />
             </ProtectedRoute>
           }
         />
