@@ -22,3 +22,14 @@ class AlertPreferenceCreate(BaseModel):
     enabled: bool = True
     scope: str = "tenant"
     severity: str = "medium"
+
+
+class AlertPreferenceUpdate(BaseModel):
+    """Payload for updating an existing alert rule."""
+
+    name: str = Field(min_length=3)
+    channel: str
+    trigger: str = Field(min_length=3)
+    enabled: bool = True
+    scope: str = "tenant"
+    severity: str = "medium"

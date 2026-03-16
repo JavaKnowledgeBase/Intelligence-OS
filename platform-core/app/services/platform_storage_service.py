@@ -23,7 +23,7 @@ from app.models.platform_tables import (
     UserRecord,
 )
 from app.models.seed_data import ALERTS, LISTINGS, MARKET_INSIGHTS, PROJECTS
-from app.schemas.alert import AlertPreference, AlertPreferenceCreate
+from app.schemas.alert import AlertPreference, AlertPreferenceCreate, AlertPreferenceUpdate
 from app.schemas.auth import AuthUser
 from app.schemas.document import ProjectDocumentSummary
 from app.schemas.ingestion import IngestionRunSummary
@@ -387,6 +387,40 @@ class PlatformStorageService:
             session.flush()
             session.refresh(record)
             return self._to_alert_preference(record)
+
+    def update_alert(self, tenant_id: str, alert_id: str, payload: AlertPreferenceUpdate) -> AlertPreference | None:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(AlertPreferenceRecord).where(
+                    AlertPreferenceRecord.id == alert_id,
+                    AlertPreferenceRecord.tenant_id == tenant_id,
+                )
+            )
+            if record is None:
+                return None
+            record.name = payload.name
+            record.channel = payload.channel
+            record.trigger = payload.trigger
+            record.enabled = payload.enabled
+            record.scope = payload.scope
+            record.severity = payload.severity
+            session.flush()
+            session.refresh(record)
+            return self._to_alert_preference(record)
+
+    def delete_alert(self, tenant_id: str, alert_id: str) -> bool:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(AlertPreferenceRecord).where(
+                    AlertPreferenceRecord.id == alert_id,
+                    AlertPreferenceRecord.tenant_id == tenant_id,
+                )
+            )
+            if record is None:
+                return False
+            session.delete(record)
+            session.flush()
+            return True
 
     def create_ingestion_run(
         self,

@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.schemas.alert import AlertPreference, AlertPreferenceCreate
+from app.schemas.alert import AlertPreference, AlertPreferenceCreate, AlertPreferenceUpdate
 from app.schemas.auth import AuthUser
 from app.schemas.document import ProjectDocumentSummary
 from app.schemas.listing import DealSearchResponse, ListingCreate, ListingSummary
@@ -292,6 +292,41 @@ class PlatformService:
         )
         self._alerts.append(alert)
         return alert
+
+    def update_alert(self, alert_id: str, payload: AlertPreferenceUpdate, user: AuthUser) -> AlertPreference:
+        """Update a tenant-scoped alert rule."""
+        authorization_service.require_tenant_editor(user)
+        if platform_storage_service.is_available():
+            try:
+                updated = platform_storage_service.update_alert(user.tenant_id, alert_id, payload)
+            except SQLAlchemyError:
+                updated = None
+            if updated is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert rule not found.")
+            return updated
+        for index, alert in enumerate(self._alerts):
+            if alert.id == alert_id:
+                updated = AlertPreference(id=alert_id, **payload.model_dump())
+                self._alerts[index] = updated
+                return updated
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert rule not found.")
+
+    def delete_alert(self, alert_id: str, user: AuthUser) -> None:
+        """Delete a tenant-scoped alert rule."""
+        authorization_service.require_tenant_editor(user)
+        if platform_storage_service.is_available():
+            try:
+                deleted = platform_storage_service.delete_alert(user.tenant_id, alert_id)
+            except SQLAlchemyError:
+                deleted = False
+            if not deleted:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert rule not found.")
+            return
+        for index, alert in enumerate(self._alerts):
+            if alert.id == alert_id:
+                self._alerts.pop(index)
+                return
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert rule not found.")
 
     def get_overview(self, user: AuthUser) -> PlatformOverview:
         """Build summary metrics for the main dashboard."""

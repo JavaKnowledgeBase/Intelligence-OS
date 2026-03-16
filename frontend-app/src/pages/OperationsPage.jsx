@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { getSession } from "../auth";
-import { createAlertRule, fetchAlerts, fetchIngestionRuns, triggerIngestionSync } from "../api/operationsClient";
+import {
+  createAlertRule,
+  deleteAlertRule,
+  fetchAlerts,
+  fetchIngestionRuns,
+  triggerIngestionSync,
+  updateAlertRule,
+} from "../api/operationsClient";
 import { SectionTitle } from "../components/SectionTitle";
 
 const emptyAlertForm = {
@@ -35,6 +42,8 @@ export function OperationsPage() {
   const [infoMessage, setInfoMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isCreatingAlert, setIsCreatingAlert] = useState(false);
+  const [activeAlertId, setActiveAlertId] = useState("");
+  const [editingAlertId, setEditingAlertId] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
@@ -84,6 +93,89 @@ export function OperationsPage() {
     }
   }
 
+  function startEditAlert(alert) {
+    setEditingAlertId(alert.id);
+    setAlertForm({
+      name: alert.name,
+      channel: alert.channel,
+      trigger: alert.trigger,
+      severity: alert.severity,
+    });
+    setInfoMessage("");
+    setErrorMessage("");
+  }
+
+  function cancelEditAlert() {
+    setEditingAlertId("");
+    setAlertForm(emptyAlertForm);
+  }
+
+  async function handleSaveAlertEdit(event) {
+    event.preventDefault();
+    if (!editingAlertId) {
+      return;
+    }
+    try {
+      setActiveAlertId(editingAlertId);
+      setErrorMessage("");
+      setInfoMessage("");
+      const current = alerts.find((alert) => alert.id === editingAlertId);
+      const updated = await updateAlertRule(editingAlertId, {
+        ...alertForm,
+        enabled: current?.enabled ?? true,
+        scope: current?.scope ?? "tenant",
+      });
+      setAlerts((existing) => existing.map((alert) => (alert.id === editingAlertId ? updated : alert)));
+      setEditingAlertId("");
+      setAlertForm(emptyAlertForm);
+      setInfoMessage(`Alert updated: ${updated.name}`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to update the alert rule.");
+    } finally {
+      setActiveAlertId("");
+    }
+  }
+
+  async function handleToggleAlert(alert) {
+    try {
+      setActiveAlertId(alert.id);
+      setErrorMessage("");
+      setInfoMessage("");
+      const updated = await updateAlertRule(alert.id, {
+        name: alert.name,
+        channel: alert.channel,
+        trigger: alert.trigger,
+        severity: alert.severity,
+        enabled: !alert.enabled,
+        scope: alert.scope,
+      });
+      setAlerts((existing) => existing.map((item) => (item.id === alert.id ? updated : item)));
+      setInfoMessage(`Alert ${updated.enabled ? "enabled" : "disabled"}: ${updated.name}`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to update the alert rule.");
+    } finally {
+      setActiveAlertId("");
+    }
+  }
+
+  async function handleDeleteAlert(alertId) {
+    try {
+      setActiveAlertId(alertId);
+      setErrorMessage("");
+      setInfoMessage("");
+      await deleteAlertRule(alertId);
+      setAlerts((existing) => existing.filter((alert) => alert.id !== alertId));
+      if (editingAlertId === alertId) {
+        cancelEditAlert();
+      }
+      setInfoMessage("Alert rule deleted.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to delete the alert rule.");
+    } finally {
+      setActiveAlertId("");
+    }
+  }
+
   async function handleSync() {
     try {
       setIsSyncing(true);
@@ -120,7 +212,7 @@ export function OperationsPage() {
             description="These rules decide what the platform should watch and how the team gets notified."
           />
           {canManageOperations ? (
-            <form className="login-form project-form" onSubmit={handleCreateAlert}>
+            <form className="login-form project-form" onSubmit={editingAlertId ? handleSaveAlertEdit : handleCreateAlert}>
               <label>
                 Rule name
                 <input
@@ -159,8 +251,19 @@ export function OperationsPage() {
                 />
               </label>
               <button type="submit" className="primary-button login-submit" disabled={isCreatingAlert}>
-                {isCreatingAlert ? "Creating rule..." : "Create alert rule"}
+                {editingAlertId
+                  ? activeAlertId === editingAlertId
+                    ? "Saving alert..."
+                    : "Save alert changes"
+                  : isCreatingAlert
+                    ? "Creating rule..."
+                    : "Create alert rule"}
               </button>
+              {editingAlertId ? (
+                <button type="button" className="ghost-button login-submit" onClick={cancelEditAlert} disabled={activeAlertId === editingAlertId}>
+                  Cancel edit
+                </button>
+              ) : null}
             </form>
           ) : (
             <p className="hint-text">Your current role can view alert rules, but only analysts and admins can create them.</p>
@@ -176,9 +279,39 @@ export function OperationsPage() {
                     {alert.channel} | {alert.severity} | {alert.enabled ? "enabled" : "disabled"}
                   </small>
                 </div>
-                <span className={`status-pill ${alert.enabled ? "status-live" : "status-pending"}`}>
-                  {toTitleCase(alert.scope)}
-                </span>
+                <div className="admin-request-side">
+                  <span className={`status-pill ${alert.enabled ? "status-live" : "status-pending"}`}>
+                    {toTitleCase(alert.scope)}
+                  </span>
+                  {canManageOperations ? (
+                    <div className="admin-request-actions">
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={activeAlertId === alert.id}
+                        onClick={() => handleToggleAlert(alert)}
+                      >
+                        {activeAlertId === alert.id ? "Saving..." : alert.enabled ? "Disable" : "Enable"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={activeAlertId === alert.id}
+                        onClick={() => startEditAlert(alert)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={activeAlertId === alert.id}
+                        onClick={() => handleDeleteAlert(alert.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </article>
             ))}
             {!alerts.length && !isLoading ? <p className="hint-text">No alert rules are configured yet.</p> : null}
