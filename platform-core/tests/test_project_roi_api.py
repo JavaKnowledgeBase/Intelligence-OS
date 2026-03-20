@@ -1,6 +1,6 @@
 import unittest
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -41,6 +41,8 @@ class ProjectRoiApiTests(unittest.TestCase):
         platform_service._market_insights = [MarketInsight.model_validate(item) for item in deepcopy(MARKET_INSIGHTS)]
         platform_service._alerts = [AlertPreference.model_validate(item) for item in deepcopy(ALERTS)]
         platform_service._roi_scenarios = [RoiScenarioSummary.model_validate(item) for item in deepcopy(ROI_SCENARIOS)]
+        platform_service._roi_actuals = []
+        platform_service._benchmark_comps = []
 
     def tearDown(self) -> None:
         user_storage_service.list_tenant_users = self._original_list_tenant_users
@@ -87,6 +89,16 @@ class ProjectRoiApiTests(unittest.TestCase):
         self.assertEqual(payload["roi_snapshot"]["scenario_count"], 3)
         self.assertIsNotNone(payload["roi_snapshot"]["base_case_irr"])
         self.assertIn("best_equity_multiple", payload["roi_snapshot"])
+        self.assertIn("best_risk_adjusted_scenario_id", payload["roi_snapshot"])
+        self.assertEqual(len(payload["roi_snapshot"]["scenario_rankings"]), 3)
+        self.assertGreaterEqual(
+            payload["roi_snapshot"]["scenario_rankings"][0]["risk_adjusted_score"],
+            payload["roi_snapshot"]["scenario_rankings"][-1]["risk_adjusted_score"],
+        )
+        self.assertIn(
+            payload["roi_snapshot"]["scenario_rankings"][0]["recommendation"],
+            {"invest", "watch", "reject"},
+        )
 
     def test_preview_roi_scenario_returns_computed_metrics(self) -> None:
         response = self.client.post(
@@ -142,6 +154,80 @@ class ProjectRoiApiTests(unittest.TestCase):
         self.assertIn("depreciation", payload["monthly_cash_flows"][0])
         self.assertIn("change_in_working_capital", payload["monthly_cash_flows"][0])
         self.assertIn("tax_shield", payload["monthly_cash_flows"][0])
+        self.assertIn("analysis", payload)
+        self.assertIn("risk_flags", payload["analysis"])
+        self.assertIn("stress_tests", payload["analysis"])
+        self.assertIn("return_attribution", payload["analysis"])
+        self.assertIn("value_driver_summary", payload["analysis"])
+        self.assertIn("valuation_sanity", payload["analysis"])
+        self.assertIn("quality_of_earnings", payload["analysis"])
+        self.assertIn("execution_risk", payload["analysis"])
+        self.assertIn("governance_risk", payload["analysis"])
+        self.assertIn("benchmark_assessment", payload["analysis"])
+        self.assertIn("monte_carlo", payload["analysis"])
+        self.assertEqual(payload["analysis"]["monte_carlo"]["simulation_count"], 120)
+        self.assertIn("probability_negative_npv", payload["analysis"]["monte_carlo"])
+        self.assertIn("downside_irr_5th_percentile", payload["analysis"]["monte_carlo"])
+        self.assertIn("expected_shortfall_npv", payload["analysis"]["monte_carlo"])
+        self.assertIn("stressed_regime_probability", payload["analysis"]["monte_carlo"])
+        self.assertIn("risk_adjusted_score", payload["analysis"])
+        self.assertIn("recommendation", payload)
+        self.assertIn(payload["recommendation"]["recommendation"], {"invest", "watch", "reject"})
+        self.assertGreaterEqual(len(payload["recommendation"]["rationale"]), 1)
+
+    def test_analyze_roi_scenario_returns_diagnostics_and_stress_cases(self) -> None:
+        response = self.client.post(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/analyze",
+            headers=self.auth_headers(
+                user_id="user-analyst-demo",
+                email="analyst@example.com",
+                full_name="Analyst Demo",
+                role="analyst",
+                tenant_id="tenant-torilaure",
+            ),
+            json={
+                "name": "Analysis case",
+                "scenario_type": "custom",
+                "listing_id": "deal-1001",
+                "purchase_price": 6200000,
+                "upfront_capex": 450000,
+                "annual_revenue": 980000,
+                "vacancy_rate": 8,
+                "annual_operating_expenses": 320000,
+                "annual_capex_reserve": 45000,
+                "annual_depreciation": 180000,
+                "exit_cap_rate": 6.5,
+                "hold_period_years": 5,
+                "leverage_ratio": 78,
+                "interest_rate": 6.75,
+                "lease_assumptions": [
+                    {
+                        "tenant_name": "Major Tenant",
+                        "monthly_rent": 81000,
+                        "start_month": 1,
+                        "end_month": 60,
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["scenario"]["id"], "preview")
+        self.assertEqual(len(payload["analysis"]["stress_tests"]), 5)
+        self.assertTrue(any(flag["code"] == "high_leverage" for flag in payload["analysis"]["risk_flags"]))
+        self.assertIn("return_attribution", payload["analysis"])
+        self.assertIn("terminal_value_share_of_present_value", payload["analysis"]["value_driver_summary"])
+        self.assertIn("valuation_sanity", payload["analysis"])
+        self.assertIn("quality_of_earnings", payload["analysis"])
+        self.assertIn("execution_risk", payload["analysis"])
+        self.assertIn("governance_risk", payload["analysis"])
+        self.assertIn("benchmark_assessment", payload["analysis"])
+        self.assertEqual(payload["analysis"]["monte_carlo"]["simulation_count"], 120)
+        self.assertIn("probability_dscr_below_one", payload["analysis"]["monte_carlo"])
+        self.assertIn("risk_adjusted_score", payload["analysis"])
+        self.assertIn("recommendation", payload)
+        self.assertIn(payload["recommendation"]["conviction"], {"low", "medium", "high"})
 
     def test_roi_sensitivity_returns_matrix(self) -> None:
         response = self.client.post(
@@ -179,6 +265,112 @@ class ProjectRoiApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(len(payload["points"]), 25)
+
+    def test_admin_can_record_actuals_and_view_variance(self) -> None:
+        headers = self.auth_headers(
+            user_id="user-ravi-kafley",
+            email="founder@example.com",
+            full_name="Ravi Kafley",
+            role="admin",
+            tenant_id="tenant-torilaure",
+        )
+        create_response = self.client.post(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/roi-base-sunbelt/actuals",
+            headers=headers,
+            json={
+                "period_start": str(date(2026, 1, 1)),
+                "effective_revenue": 76000,
+                "operating_expenses": 25500,
+                "capex": 3000,
+                "debt_service": 18250,
+                "occupancy_rate": 94.0,
+                "note": "January operating actuals",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201)
+        created = create_response.json()
+        self.assertEqual(created["scenario_id"], "roi-base-sunbelt")
+
+        list_response = self.client.get(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/roi-base-sunbelt/actuals",
+            headers=headers,
+        )
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.json()), 1)
+
+        variance_response = self.client.get(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/roi-base-sunbelt/variance",
+            headers=headers,
+        )
+        self.assertEqual(variance_response.status_code, 200)
+        variance = variance_response.json()
+        self.assertEqual(len(variance["periods"]), 1)
+        self.assertIn("total_noi_variance", variance)
+        self.assertGreaterEqual(len(variance["variance_summary"]), 1)
+
+    def test_admin_can_create_benchmark_comp_and_get_calibration(self) -> None:
+        headers = self.auth_headers(
+            user_id="user-ravi-kafley",
+            email="founder@example.com",
+            full_name="Ravi Kafley",
+            role="admin",
+            tenant_id="tenant-torilaure",
+        )
+        create_response = self.client.post(
+            "/api/v1/market/benchmark-comps",
+            headers=headers,
+            json={
+                "asset_class": "real-estate",
+                "location": "Charlotte, NC",
+                "source_name": "manual-comp-set",
+                "closed_on": str(date(2025, 12, 31)),
+                "sale_price": 6100000,
+                "net_operating_income": 590000,
+                "cap_rate": 9.67,
+                "projected_irr": 19.4,
+                "equity_multiple": 2.15,
+                "average_dscr": 1.42,
+                "occupancy_rate": 95.0,
+                "leverage_ratio": 58.0,
+                "note": "Recent local comp",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201)
+
+        calibration_response = self.client.get(
+            "/api/v1/market/benchmark-calibration/real-estate",
+            headers=headers,
+        )
+        self.assertEqual(calibration_response.status_code, 200)
+        calibration = calibration_response.json()
+        self.assertEqual(calibration["source_mode"], "external_comps")
+        self.assertGreaterEqual(calibration["comp_count"], 1)
+
+        analysis_response = self.client.post(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/analyze",
+            headers=headers,
+            json={
+                "name": "Comp-backed analysis",
+                "scenario_type": "custom",
+                "listing_id": "deal-1001",
+                "purchase_price": 6200000,
+                "upfront_capex": 450000,
+                "annual_revenue": 980000,
+                "vacancy_rate": 5,
+                "annual_operating_expenses": 320000,
+                "annual_capex_reserve": 45000,
+                "exit_cap_rate": 6.5,
+                "hold_period_years": 5,
+                "leverage_ratio": 55,
+                "interest_rate": 6,
+            },
+        )
+        self.assertEqual(analysis_response.status_code, 200)
+        analysis = analysis_response.json()
+        self.assertEqual(
+            analysis["analysis"]["benchmark_assessment"]["notes"][1],
+            "Benchmark ranges were calibrated from comparable records.",
+        )
 
     def test_investor_cannot_create_roi_scenario(self) -> None:
         response = self.client.post(

@@ -15,13 +15,22 @@ from app.schemas.market import MarketInsight, MarketInsightCreate
 from app.schemas.note import ProjectActivityItem, ProjectNoteCreate, ProjectNoteSummary, ProjectNoteUpdate
 from app.schemas.project import PlatformOverview, ProjectCreate, ProjectMemberAdd, ProjectSummary, ProjectWorkspace
 from app.schemas.roi import (
+    RoiActualCreate,
+    RoiActualSummary,
+    RoiBenchmarkCalibrationResponse,
+    RoiBenchmarkCompCreate,
+    RoiBenchmarkCompSummary,
     RoiPortfolioSnapshot,
+    RoiRecommendationSummary,
+    RoiScenarioAnalysisResponse,
     RoiScenarioCalculationResponse,
     RoiScenarioCreate,
     RoiScenarioInput,
     RoiScenarioSummary,
     RoiSensitivityResponse,
     RoiScenarioUpdate,
+    RoiVarianceAnalysis,
+    RoiVariancePeriod,
 )
 from app.services.authorization_service import authorization_service
 from app.services.platform_storage_service import platform_storage_service
@@ -40,6 +49,8 @@ class PlatformService:
         self._market_insights: list[MarketInsight] = []
         self._alerts: list[AlertPreference] = []
         self._roi_scenarios: list[RoiScenarioSummary] = []
+        self._roi_actuals: list[RoiActualSummary] = []
+        self._benchmark_comps: list[RoiBenchmarkCompSummary] = []
 
     def list_projects(self, user: AuthUser) -> list[ProjectSummary]:
         """Return all shared projects."""
@@ -118,6 +129,12 @@ class PlatformService:
         downside_case = next((item for item in scenarios if item.scenario_type == "downside"), None)
         irr_values = [item.projected_irr for item in scenarios if item.projected_irr is not None]
         npv_values = [item.projected_npv for item in scenarios]
+        rankings = sorted(
+            [roi_analysis_service.build_ranking_item(item) for item in scenarios],
+            key=lambda item: item.risk_adjusted_score,
+            reverse=True,
+        )
+        top_ranked = rankings[0] if rankings else None
         return RoiPortfolioSnapshot(
             scenario_count=len(scenarios),
             base_case_irr=base_case.projected_irr if base_case else None,
@@ -135,6 +152,10 @@ class PlatformService:
             )
             if any(item.average_dscr is not None for item in scenarios)
             else None,
+            best_risk_adjusted_scenario_id=top_ranked.scenario_id if top_ranked else None,
+            best_risk_adjusted_scenario_name=top_ranked.scenario_name if top_ranked else None,
+            best_risk_adjusted_score=top_ranked.risk_adjusted_score if top_ranked else None,
+            scenario_rankings=rankings,
         )
 
     def calculate_project_roi_scenario(
@@ -154,10 +175,192 @@ class PlatformService:
             payload=payload,
         )
         computed = roi_analysis_service.calculate(payload)
+        benchmark_profile = self._resolve_benchmark_profile(payload.listing_id, user)
+        benchmark_ranges = self._resolve_calibrated_benchmark_ranges(benchmark_profile, user)
+        analysis = roi_analysis_service.build_analysis(payload, computed, benchmark_profile, benchmark_ranges)
         return RoiScenarioCalculationResponse(
             scenario=scenario,
             annual_cash_flows=computed.annual_cash_flows,
             monthly_cash_flows=computed.monthly_cash_flows,
+            analysis=analysis,
+            recommendation=roi_analysis_service.build_recommendation(payload, analysis, computed),
+        )
+
+    def analyze_project_roi_scenario(
+        self,
+        project_id: str,
+        payload: RoiScenarioInput,
+        user: AuthUser,
+    ) -> RoiScenarioAnalysisResponse:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        self._validate_roi_listing(project_id, payload.listing_id, user)
+        scenario = roi_analysis_service.to_summary(
+            scenario_id="preview",
+            project_id=project_id,
+            tenant_id=user.tenant_id,
+            payload=payload,
+        )
+        computed = roi_analysis_service.calculate(payload)
+        benchmark_profile = self._resolve_benchmark_profile(payload.listing_id, user)
+        benchmark_ranges = self._resolve_calibrated_benchmark_ranges(benchmark_profile, user)
+        analysis = roi_analysis_service.build_analysis(payload, computed, benchmark_profile, benchmark_ranges)
+        return RoiScenarioAnalysisResponse(
+            scenario=scenario,
+            analysis=analysis,
+            recommendation=roi_analysis_service.build_recommendation(payload, analysis, computed),
+        )
+
+    def list_benchmark_comps(self, user: AuthUser, asset_class: str | None = None) -> list[RoiBenchmarkCompSummary]:
+        authorization_service.require_tenant_editor(user)
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.list_benchmark_comps(user.tenant_id, asset_class)
+            except SQLAlchemyError:
+                pass
+        comps = [item for item in self._benchmark_comps if item.tenant_id == user.tenant_id]
+        if asset_class:
+            comps = [item for item in comps if item.asset_class == asset_class]
+        return comps
+
+    def create_benchmark_comp(self, payload: RoiBenchmarkCompCreate, user: AuthUser) -> RoiBenchmarkCompSummary:
+        authorization_service.require_tenant_editor(user)
+        comp = RoiBenchmarkCompSummary(
+            id=f"comp-{uuid4().hex[:8]}",
+            tenant_id=user.tenant_id,
+            **payload.model_dump(),
+        )
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.create_benchmark_comp(comp)
+            except SQLAlchemyError:
+                pass
+        self._benchmark_comps.append(comp)
+        return comp
+
+    def get_benchmark_calibration(self, asset_class: str, user: AuthUser) -> RoiBenchmarkCalibrationResponse:
+        authorization_service.require_tenant_editor(user)
+        comps = self.list_benchmark_comps(user, asset_class)
+        _, calibration = roi_analysis_service.calibrate_benchmark_profile(asset_class, comps)
+        return calibration
+
+    def list_project_roi_actuals(self, project_id: str, scenario_id: str, user: AuthUser) -> list[RoiActualSummary]:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        scenario = self.get_project_roi_scenario(project_id, scenario_id, user)
+        if scenario is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI scenario not found.")
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.list_project_roi_actuals(
+                    tenant_id=user.tenant_id,
+                    project_id=project_id,
+                    scenario_id=scenario_id,
+                )
+            except SQLAlchemyError:
+                pass
+        return [
+            item for item in self._roi_actuals
+            if item.project_id == project_id and item.scenario_id == scenario_id and item.tenant_id == user.tenant_id
+        ]
+
+    def create_project_roi_actual(
+        self,
+        project_id: str,
+        scenario_id: str,
+        payload: RoiActualCreate,
+        user: AuthUser,
+    ) -> RoiActualSummary:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        authorization_service.require_project_management(user, project)
+        scenario = self.get_project_roi_scenario(project_id, scenario_id, user)
+        if scenario is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI scenario not found.")
+        actual = RoiActualSummary(
+            id=f"roi-actual-{uuid4().hex[:8]}",
+            project_id=project_id,
+            tenant_id=user.tenant_id,
+            scenario_id=scenario_id,
+            **payload.model_dump(),
+        )
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.create_project_roi_actual(actual)
+            except SQLAlchemyError:
+                pass
+        self._roi_actuals.append(actual)
+        self._roi_actuals.sort(key=lambda item: item.period_start)
+        return actual
+
+    def build_project_roi_variance_analysis(
+        self,
+        project_id: str,
+        scenario_id: str,
+        user: AuthUser,
+    ) -> RoiVarianceAnalysis:
+        scenario = self.get_project_roi_scenario(project_id, scenario_id, user)
+        if scenario is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI scenario not found.")
+        actuals = self.list_project_roi_actuals(project_id, scenario_id, user)
+        computed = roi_analysis_service.calculate(RoiScenarioInput.model_validate(scenario.model_dump()))
+        monthly_expectations = computed.monthly_cash_flows
+        periods: list[RoiVariancePeriod] = []
+        for index, actual in enumerate(sorted(actuals, key=lambda item: item.period_start), start=1):
+            if index > len(monthly_expectations):
+                break
+            expected = monthly_expectations[index - 1]
+            actual_noi = actual.effective_revenue - actual.operating_expenses - actual.capex
+            expected_noi = expected.net_operating_income - expected.capex_reserve
+            expected_occupancy = max(0.0, 100 - scenario.vacancy_rate)
+            periods.append(
+                RoiVariancePeriod(
+                    period_start=actual.period_start,
+                    month_index=index,
+                    actual_revenue=actual.effective_revenue,
+                    expected_revenue=expected.effective_revenue,
+                    revenue_variance=round(actual.effective_revenue - expected.effective_revenue, 2),
+                    actual_operating_expenses=actual.operating_expenses,
+                    expected_operating_expenses=expected.operating_expenses,
+                    expense_variance=round(actual.operating_expenses - expected.operating_expenses, 2),
+                    actual_noi=round(actual_noi, 2),
+                    expected_noi=round(expected_noi, 2),
+                    noi_variance=round(actual_noi - expected_noi, 2),
+                    actual_debt_service=actual.debt_service,
+                    expected_debt_service=expected.debt_service,
+                    debt_service_variance=round(actual.debt_service - expected.debt_service, 2),
+                    actual_occupancy_rate=actual.occupancy_rate,
+                    expected_occupancy_rate=round(expected_occupancy, 2) if actual.occupancy_rate is not None else None,
+                    occupancy_variance=round(actual.occupancy_rate - expected_occupancy, 2)
+                    if actual.occupancy_rate is not None
+                    else None,
+                )
+            )
+        total_revenue_variance = round(sum(item.revenue_variance for item in periods), 2)
+        total_expense_variance = round(sum(item.expense_variance for item in periods), 2)
+        total_noi_variance = round(sum(item.noi_variance for item in periods), 2)
+        occupancy_variances = [item.occupancy_variance for item in periods if item.occupancy_variance is not None]
+        summary: list[str] = []
+        if total_revenue_variance < 0:
+            summary.append("Realized revenue is trailing the underwriting path.")
+        elif total_revenue_variance > 0:
+            summary.append("Realized revenue is outperforming underwriting so far.")
+        if total_expense_variance > 0:
+            summary.append("Operating expenses are running above plan.")
+        if total_noi_variance < 0:
+            summary.append("NOI underperformance suggests the business plan may need to be revised.")
+        elif total_noi_variance > 0:
+            summary.append("NOI is outperforming the original underwriting.")
+        return RoiVarianceAnalysis(
+            periods=periods,
+            total_revenue_variance=total_revenue_variance,
+            total_expense_variance=total_expense_variance,
+            total_noi_variance=total_noi_variance,
+            average_occupancy_variance=round(mean(occupancy_variances), 2) if occupancy_variances else None,
+            variance_summary=summary or ["No actual periods have been recorded yet."],
         )
 
     def build_project_roi_sensitivity(
@@ -665,6 +868,28 @@ class PlatformService:
         listing = next((item for item in self.list_listings(user) if item.id == listing_id), None)
         if listing is None or listing.project_id != project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ROI scenario listing must belong to this project.")
+
+    def get_project_roi_scenario(self, project_id: str, scenario_id: str, user: AuthUser) -> RoiScenarioSummary | None:
+        return next((item for item in self.list_project_roi_scenarios(project_id, user) if item.id == scenario_id), None)
+
+    def _resolve_benchmark_profile(self, listing_id: str | None, user: AuthUser) -> str:
+        if listing_id is None:
+            return "general"
+        listing = next((item for item in self.list_listings(user) if item.id == listing_id), None)
+        if listing is None:
+            return "general"
+        return listing.asset_class
+
+    def _resolve_calibrated_benchmark_ranges(
+        self,
+        benchmark_profile: str,
+        user: AuthUser,
+    ) -> dict[str, tuple[float, float]] | None:
+        comps = self.list_benchmark_comps(user, benchmark_profile)
+        if not comps:
+            return None
+        ranges, _ = roi_analysis_service.calibrate_benchmark_profile(benchmark_profile, comps)
+        return ranges
 
 
 # Shared singleton for the API layer until dependency injection is introduced.

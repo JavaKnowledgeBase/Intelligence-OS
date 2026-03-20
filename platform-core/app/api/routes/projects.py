@@ -13,12 +13,16 @@ from app.schemas.project import (
     ProjectWorkspace,
 )
 from app.schemas.roi import (
+    RoiActualCreate,
+    RoiActualSummary,
     RoiPortfolioSnapshot,
+    RoiScenarioAnalysisResponse,
     RoiScenarioCalculationResponse,
     RoiScenarioCreate,
     RoiScenarioSummary,
     RoiScenarioUpdate,
     RoiSensitivityResponse,
+    RoiVarianceAnalysis,
 )
 from app.services.project_document_service import project_document_service
 from app.services.platform_service import platform_service
@@ -203,6 +207,16 @@ def calculate_project_roi_scenario(
     return platform_service.calculate_project_roi_scenario(project_id, payload, current_user)
 
 
+@router.post("/{project_id}/roi-scenarios/analyze", response_model=RoiScenarioAnalysisResponse)
+def analyze_project_roi_scenario(
+    project_id: str,
+    payload: RoiScenarioCreate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiScenarioAnalysisResponse:
+    """Return analytical diagnostics, value concentration, and stress outcomes for a scenario."""
+    return platform_service.analyze_project_roi_scenario(project_id, payload, current_user)
+
+
 @router.post("/{project_id}/roi-scenarios/sensitivity", response_model=RoiSensitivityResponse)
 def build_project_roi_sensitivity(
     project_id: str,
@@ -243,6 +257,37 @@ def delete_project_roi_scenario(
     """Delete a persisted project ROI scenario."""
     platform_service.delete_project_roi_scenario(project_id, scenario_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{project_id}/roi-scenarios/{scenario_id}/actuals", response_model=list[RoiActualSummary])
+def list_project_roi_actuals(
+    project_id: str,
+    scenario_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> list[RoiActualSummary]:
+    """Return realized monthly operating actuals captured for an ROI scenario."""
+    return platform_service.list_project_roi_actuals(project_id, scenario_id, current_user)
+
+
+@router.post("/{project_id}/roi-scenarios/{scenario_id}/actuals", response_model=RoiActualSummary, status_code=201)
+def create_project_roi_actual(
+    project_id: str,
+    scenario_id: str,
+    payload: RoiActualCreate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiActualSummary:
+    """Persist a realized monthly operating result for variance analysis."""
+    return platform_service.create_project_roi_actual(project_id, scenario_id, payload, current_user)
+
+
+@router.get("/{project_id}/roi-scenarios/{scenario_id}/variance", response_model=RoiVarianceAnalysis)
+def get_project_roi_variance_analysis(
+    project_id: str,
+    scenario_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiVarianceAnalysis:
+    """Compare recorded realized operating results against the original underwriting path."""
+    return platform_service.build_project_roi_variance_analysis(project_id, scenario_id, current_user)
 
 
 @router.get("/{project_id}", response_model=ProjectSummary)

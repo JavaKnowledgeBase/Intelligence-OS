@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -174,12 +174,275 @@ class RoiSensitivityResponse(BaseModel):
     points: list[RoiSensitivityPoint]
 
 
+class RoiRiskFlag(BaseModel):
+    """Human-readable model warning highlighting a specific weakness or concentration."""
+
+    severity: Literal["low", "medium", "high"]
+    code: str
+    title: str
+    detail: str
+
+
+class RoiStressTestResult(BaseModel):
+    """Result for a standard downside or upside stress case."""
+
+    scenario_name: str
+    scenario_key: str
+    projected_irr: float | None = None
+    projected_npv: float | None = None
+    equity_multiple: float | None = None
+    average_dscr: float | None = None
+    minimum_dscr: float | None = None
+
+
+class RoiValueDriverSummary(BaseModel):
+    """High-level attribution and concentration summary for the scenario."""
+
+    operating_cash_flow_present_value: float
+    terminal_value_present_value: float
+    terminal_value_share_of_present_value: float | None = None
+    sale_proceeds_share_of_total_cash_flow: float | None = None
+    tax_shield_share_of_present_value: float | None = None
+    leverage_ratio: float
+
+
+class RoiReturnAttribution(BaseModel):
+    """Breakdown of the major sources of modeled value creation or loss."""
+
+    operating_cash_flow_contribution: float
+    sale_proceeds_contribution: float
+    tax_shield_contribution: float
+    leverage_contribution: float
+    fee_drag_contribution: float
+    working_capital_drag_contribution: float
+
+
+class RoiValuationSanityCheck(BaseModel):
+    """Checks that catch valuation structures which are overly dependent on fragile assumptions."""
+
+    terminal_value_dependency: Literal["healthy", "elevated", "critical"]
+    entry_cap_rate: float | None = None
+    spread_to_exit_cap_rate: float | None = None
+    implied_value_creation_multiple: float | None = None
+    notes: list[str]
+
+
+class RoiQualityOfEarningsCheck(BaseModel):
+    """Simple underwriting-forensics checks for revenue and earnings quality."""
+
+    revenue_quality: Literal["strong", "moderate", "weak"]
+    earnings_quality: Literal["strong", "moderate", "weak"]
+    revenue_concentration_risk: Literal["low", "medium", "high"]
+    notes: list[str]
+
+
+class RoiExecutionRiskCheck(BaseModel):
+    """Operational and integration-style fragility checks."""
+
+    execution_risk: Literal["low", "medium", "high"]
+    lease_rollover_risk: Literal["low", "medium", "high"]
+    downside_case_reliance: Literal["low", "medium", "high"]
+    notes: list[str]
+
+
+class RoiGovernanceRiskCheck(BaseModel):
+    """Business-model and governance-style fragility indicators inferred from the scenario structure."""
+
+    governance_risk: Literal["low", "medium", "high"]
+    model_complexity_risk: Literal["low", "medium", "high"]
+    leverage_discipline: Literal["strong", "moderate", "weak"]
+    notes: list[str]
+
+
+class RoiBenchmarkMetricComparison(BaseModel):
+    """Comparison of a modeled metric against a benchmark range."""
+
+    metric: str
+    actual: float | None = None
+    benchmark_min: float | None = None
+    benchmark_max: float | None = None
+    status: Literal["below", "within", "above", "unavailable"]
+    note: str
+
+
+class RoiBenchmarkAssessment(BaseModel):
+    """Sector-profile comparison using configurable benchmark ranges."""
+
+    benchmark_profile: str
+    overall_assessment: Literal["outperform", "mixed", "underperform"]
+    confidence: Literal["low", "medium", "high"]
+    metrics: list[RoiBenchmarkMetricComparison]
+    notes: list[str]
+
+
+class RoiBenchmarkCompCreate(BaseModel):
+    """Manual or imported comparable transaction/performance record used for calibration."""
+
+    asset_class: str
+    location: str
+    source_name: str = Field(min_length=2, max_length=120)
+    closed_on: date | None = None
+    sale_price: float = Field(ge=0)
+    net_operating_income: float | None = Field(default=None, ge=0)
+    cap_rate: float | None = Field(default=None, ge=0, le=100)
+    projected_irr: float | None = Field(default=None, ge=0, le=100)
+    equity_multiple: float | None = Field(default=None, ge=0)
+    average_dscr: float | None = Field(default=None, ge=0)
+    occupancy_rate: float | None = Field(default=None, ge=0, le=100)
+    leverage_ratio: float | None = Field(default=None, ge=0, le=100)
+    note: str = Field(default="", max_length=400)
+
+
+class RoiBenchmarkCompSummary(RoiBenchmarkCompCreate):
+    """Saved benchmark comparable used by calibration and benchmarking."""
+
+    id: str
+    tenant_id: str
+    created_at: datetime | None = None
+
+
+class RoiBenchmarkCalibrationResponse(BaseModel):
+    """Calibrated benchmark ranges derived from available comparable records."""
+
+    benchmark_profile: str
+    comp_count: int
+    source_mode: Literal["external_comps", "default_profile"]
+    metrics: list[RoiBenchmarkMetricComparison]
+    notes: list[str]
+
+
+class RoiMonteCarloSummary(BaseModel):
+    """Probabilistic return summary across simulated downside and upside paths."""
+
+    simulation_count: int
+    mean_projected_irr: float | None = None
+    median_projected_irr: float | None = None
+    downside_irr_5th_percentile: float | None = None
+    upside_irr_95th_percentile: float | None = None
+    mean_projected_npv: float | None = None
+    downside_npv_5th_percentile: float | None = None
+    upside_npv_95th_percentile: float | None = None
+    mean_equity_multiple: float | None = None
+    probability_negative_irr: float | None = None
+    probability_negative_npv: float | None = None
+    probability_dscr_below_one: float | None = None
+    probability_equity_multiple_below_one: float | None = None
+    expected_shortfall_npv: float | None = None
+    stressed_regime_probability: float | None = None
+
+
+class RoiScenarioAnalysis(BaseModel):
+    """Analytical overlay used to explain quality and fragility of the modeled returns."""
+
+    return_attribution: RoiReturnAttribution
+    value_driver_summary: RoiValueDriverSummary
+    valuation_sanity: RoiValuationSanityCheck
+    quality_of_earnings: RoiQualityOfEarningsCheck
+    execution_risk: RoiExecutionRiskCheck
+    governance_risk: RoiGovernanceRiskCheck
+    benchmark_assessment: RoiBenchmarkAssessment
+    risk_flags: list[RoiRiskFlag]
+    stress_tests: list[RoiStressTestResult]
+    monte_carlo: RoiMonteCarloSummary
+    risk_adjusted_score: float | None = None
+
+
+class RoiRecommendationSummary(BaseModel):
+    """Decision-oriented recommendation derived from the scenario analysis."""
+
+    recommendation: Literal["invest", "watch", "reject"]
+    conviction: Literal["low", "medium", "high"]
+    score: float
+    rationale: list[str]
+    required_assumption_checks: list[str]
+
+
+class RoiScenarioRankingItem(BaseModel):
+    """Project-level ranking row for comparing saved ROI scenarios by risk-adjusted quality."""
+
+    scenario_id: str
+    scenario_name: str
+    scenario_type: ScenarioKind
+    projected_irr: float | None = None
+    projected_npv: float | None = None
+    equity_multiple: float | None = None
+    risk_adjusted_score: float
+    recommendation: Literal["invest", "watch", "reject"] | None = None
+    probability_negative_npv: float | None = None
+    probability_dscr_below_one: float | None = None
+
+
+class RoiActualCreate(BaseModel):
+    """Persisted realized monthly operating results tied to an ROI scenario."""
+
+    period_start: date
+    effective_revenue: float = Field(ge=0)
+    operating_expenses: float = Field(ge=0)
+    capex: float = Field(default=0, ge=0)
+    debt_service: float = Field(default=0, ge=0)
+    occupancy_rate: float | None = Field(default=None, ge=0, le=100)
+    note: str = Field(default="", max_length=400)
+
+
+class RoiActualSummary(RoiActualCreate):
+    """Saved realized monthly result for variance analysis."""
+
+    id: str
+    project_id: str
+    tenant_id: str
+    scenario_id: str
+    created_at: datetime | None = None
+
+
+class RoiVariancePeriod(BaseModel):
+    """Comparison of realized and underwritten monthly performance."""
+
+    period_start: date
+    month_index: int
+    actual_revenue: float
+    expected_revenue: float
+    revenue_variance: float
+    actual_operating_expenses: float
+    expected_operating_expenses: float
+    expense_variance: float
+    actual_noi: float
+    expected_noi: float
+    noi_variance: float
+    actual_debt_service: float
+    expected_debt_service: float
+    debt_service_variance: float
+    actual_occupancy_rate: float | None = None
+    expected_occupancy_rate: float | None = None
+    occupancy_variance: float | None = None
+
+
+class RoiVarianceAnalysis(BaseModel):
+    """Aggregate realized-vs-underwritten drift analysis for a scenario."""
+
+    periods: list[RoiVariancePeriod]
+    total_revenue_variance: float
+    total_expense_variance: float
+    total_noi_variance: float
+    average_occupancy_variance: float | None = None
+    variance_summary: list[str]
+
+
 class RoiScenarioCalculationResponse(BaseModel):
     """Ephemeral calculation preview for ROI inputs."""
 
     scenario: RoiScenarioSummary
     annual_cash_flows: list[RoiYearlyCashFlow]
     monthly_cash_flows: list[RoiMonthlyCashFlow]
+    analysis: RoiScenarioAnalysis
+    recommendation: RoiRecommendationSummary
+
+
+class RoiScenarioAnalysisResponse(BaseModel):
+    """Standalone ROI analysis payload for a project scenario input."""
+
+    scenario: RoiScenarioSummary
+    analysis: RoiScenarioAnalysis
+    recommendation: RoiRecommendationSummary
 
 
 class RoiPortfolioSnapshot(BaseModel):
@@ -193,3 +456,7 @@ class RoiPortfolioSnapshot(BaseModel):
     average_npv: float | None = None
     best_equity_multiple: float | None = None
     average_dscr: float | None = None
+    best_risk_adjusted_scenario_id: str | None = None
+    best_risk_adjusted_scenario_name: str | None = None
+    best_risk_adjusted_score: float | None = None
+    scenario_rankings: list[RoiScenarioRankingItem] = Field(default_factory=list)

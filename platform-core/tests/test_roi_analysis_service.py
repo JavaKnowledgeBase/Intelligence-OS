@@ -111,6 +111,64 @@ class RoiAnalysisServiceTests(unittest.TestCase):
         self.assertLess(fourteenth_month.effective_revenue, first_month.effective_revenue)
         self.assertGreater(fifteenth_month.effective_revenue, fourteenth_month.effective_revenue)
 
+    def test_build_analysis_returns_risk_flags_and_stress_tests(self) -> None:
+        payload = RoiScenarioCreate(
+            name="Stress case",
+            scenario_type="custom",
+            purchase_price=1_500_000,
+            upfront_capex=80_000,
+            annual_revenue=260_000,
+            vacancy_rate=9,
+            annual_operating_expenses=120_000,
+            annual_capex_reserve=12_000,
+            annual_depreciation=40_000,
+            acquisition_fee_rate=1.0,
+            loan_origination_fee_rate=0.75,
+            exit_cap_rate=7.5,
+            hold_period_years=5,
+            leverage_ratio=78,
+            interest_rate=7.25,
+            lease_assumptions=[
+                {
+                    "tenant_name": "Anchor A",
+                    "monthly_rent": 18000,
+                    "start_month": 1,
+                    "end_month": 60,
+                }
+            ],
+        )
+
+        computed = roi_analysis_service.calculate(payload)
+        analysis = roi_analysis_service.build_analysis(payload, computed)
+        recommendation = roi_analysis_service.build_recommendation(payload, analysis, computed)
+
+        self.assertGreaterEqual(len(analysis.risk_flags), 2)
+        self.assertEqual(len(analysis.stress_tests), 5)
+        self.assertGreaterEqual(analysis.return_attribution.sale_proceeds_contribution, 0)
+        self.assertGreater(analysis.return_attribution.operating_cash_flow_contribution, 0)
+        self.assertLess(analysis.return_attribution.fee_drag_contribution, 0)
+        self.assertIsNotNone(analysis.value_driver_summary.terminal_value_share_of_present_value)
+        self.assertIn(analysis.valuation_sanity.terminal_value_dependency, {"healthy", "elevated", "critical"})
+        self.assertIn(analysis.quality_of_earnings.earnings_quality, {"strong", "moderate", "weak"})
+        self.assertIn(analysis.execution_risk.execution_risk, {"low", "medium", "high"})
+        self.assertIn(analysis.governance_risk.governance_risk, {"low", "medium", "high"})
+        self.assertIn(analysis.benchmark_assessment.overall_assessment, {"outperform", "mixed", "underperform"})
+        self.assertGreaterEqual(len(analysis.benchmark_assessment.metrics), 1)
+        self.assertTrue(any(flag.code == "high_leverage" for flag in analysis.risk_flags))
+        self.assertTrue(any(result.scenario_key == "combined_downside" for result in analysis.stress_tests))
+        self.assertEqual(analysis.monte_carlo.simulation_count, 120)
+        self.assertIsNotNone(analysis.monte_carlo.mean_projected_npv)
+        self.assertIsNotNone(analysis.monte_carlo.downside_npv_5th_percentile)
+        self.assertIsNotNone(analysis.monte_carlo.probability_negative_npv)
+        self.assertIsNotNone(analysis.monte_carlo.expected_shortfall_npv)
+        self.assertIsNotNone(analysis.monte_carlo.stressed_regime_probability)
+        self.assertIsNotNone(analysis.risk_adjusted_score)
+        self.assertLess(analysis.risk_adjusted_score or 0, computed.projected_irr or 0)
+        self.assertIn(recommendation.recommendation, {"invest", "watch", "reject"})
+        self.assertGreaterEqual(len(recommendation.rationale), 1)
+        self.assertGreaterEqual(len(recommendation.required_assumption_checks), 1)
+        self.assertTrue(any("validate" in item.lower() or "review" in item.lower() or "confirm" in item.lower() for item in recommendation.required_assumption_checks))
+
 
 if __name__ == "__main__":
     unittest.main()

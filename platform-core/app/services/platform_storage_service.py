@@ -13,12 +13,14 @@ from app.core.database import SessionLocal, engine
 from app.core.config import settings
 from app.models.platform_tables import (
     AlertPreferenceRecord,
+    BenchmarkCompRecord,
     IngestionRunRecord,
     ListingRecord,
     MarketInsightRecord,
     ProjectDocumentRecord,
     ProjectMemberRecord,
     ProjectNoteRecord,
+    ProjectRoiActualRecord,
     ProjectRoiScenarioRecord,
     ProjectRecord,
     UserRecord,
@@ -32,7 +34,7 @@ from app.schemas.listing import ListingCreate, ListingSummary
 from app.schemas.market import MarketInsight, MarketInsightCreate
 from app.schemas.note import ProjectNoteSummary
 from app.schemas.project import ProjectSummary
-from app.schemas.roi import RoiScenarioSummary
+from app.schemas.roi import RoiActualSummary, RoiBenchmarkCompSummary, RoiScenarioSummary
 
 
 logger = logging.getLogger("torilaure.platform.persistence")
@@ -58,6 +60,8 @@ class PlatformStorageService:
                 "project_documents",
                 "project_notes",
                 "project_roi_scenarios",
+                "project_roi_actuals",
+                "benchmark_comps",
             }
             if not required_tables.issubset(set(inspector.get_table_names())):
                 raise SQLAlchemyError("Platform tables are missing. Run `alembic upgrade head`.")
@@ -381,6 +385,43 @@ class PlatformStorageService:
             session.delete(record)
             session.flush()
             return True
+
+    def list_project_roi_actuals(self, *, tenant_id: str, project_id: str, scenario_id: str) -> list[RoiActualSummary]:
+        with self.session_scope() as session:
+            records = session.scalars(
+                select(ProjectRoiActualRecord)
+                .where(
+                    ProjectRoiActualRecord.tenant_id == tenant_id,
+                    ProjectRoiActualRecord.project_id == project_id,
+                    ProjectRoiActualRecord.scenario_id == scenario_id,
+                )
+                .order_by(ProjectRoiActualRecord.period_start.asc(), ProjectRoiActualRecord.created_at.asc())
+            ).all()
+            return [self._to_roi_actual_summary(record) for record in records]
+
+    def create_project_roi_actual(self, actual: RoiActualSummary) -> RoiActualSummary:
+        with self.session_scope() as session:
+            record = ProjectRoiActualRecord(**actual.model_dump(exclude={"created_at"}))
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return self._to_roi_actual_summary(record)
+
+    def list_benchmark_comps(self, tenant_id: str, asset_class: str | None = None) -> list[RoiBenchmarkCompSummary]:
+        with self.session_scope() as session:
+            statement = select(BenchmarkCompRecord).where(BenchmarkCompRecord.tenant_id == tenant_id)
+            if asset_class:
+                statement = statement.where(BenchmarkCompRecord.asset_class == asset_class)
+            records = session.scalars(statement.order_by(BenchmarkCompRecord.created_at.desc())).all()
+            return [self._to_benchmark_comp_summary(record) for record in records]
+
+    def create_benchmark_comp(self, comp: RoiBenchmarkCompSummary) -> RoiBenchmarkCompSummary:
+        with self.session_scope() as session:
+            record = BenchmarkCompRecord(**comp.model_dump(exclude={"created_at"}))
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return self._to_benchmark_comp_summary(record)
 
     def create_listing(self, tenant_id: str, payload: ListingCreate) -> ListingSummary:
         with self.session_scope() as session:
@@ -816,6 +857,42 @@ class PlatformStorageService:
             full_name=record.full_name,
             role=record.role,
             tenant_id=record.tenant_id,
+        )
+
+    def _to_roi_actual_summary(self, record: ProjectRoiActualRecord) -> RoiActualSummary:
+        return RoiActualSummary(
+            id=record.id,
+            project_id=record.project_id,
+            tenant_id=record.tenant_id,
+            scenario_id=record.scenario_id,
+            period_start=record.period_start,
+            effective_revenue=record.effective_revenue,
+            operating_expenses=record.operating_expenses,
+            capex=record.capex,
+            debt_service=record.debt_service,
+            occupancy_rate=record.occupancy_rate,
+            note=record.note,
+            created_at=record.created_at,
+        )
+
+    def _to_benchmark_comp_summary(self, record: BenchmarkCompRecord) -> RoiBenchmarkCompSummary:
+        return RoiBenchmarkCompSummary(
+            id=record.id,
+            tenant_id=record.tenant_id,
+            asset_class=record.asset_class,
+            location=record.location,
+            source_name=record.source_name,
+            closed_on=record.closed_on,
+            sale_price=record.sale_price,
+            net_operating_income=record.net_operating_income,
+            cap_rate=record.cap_rate,
+            projected_irr=record.projected_irr,
+            equity_multiple=record.equity_multiple,
+            average_dscr=record.average_dscr,
+            occupancy_rate=record.occupancy_rate,
+            leverage_ratio=record.leverage_ratio,
+            note=record.note,
+            created_at=record.created_at,
         )
 
 

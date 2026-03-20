@@ -301,3 +301,55 @@ class ProjectRoiScenarioRecord(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class ProjectRoiActualRecord(Base):
+    """Persisted realized operating results used for variance analysis against an ROI scenario."""
+
+    __tablename__ = "project_roi_actuals"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    scenario_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("project_roi_scenarios.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_revenue: Mapped[float] = mapped_column(Float, nullable=False)
+    operating_expenses: Mapped[float] = mapped_column(Float, nullable=False)
+    capex: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    debt_service: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    occupancy_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class BenchmarkCompRecord(Base):
+    """Tenant-scoped comparable record used to calibrate benchmark ranges."""
+
+    __tablename__ = "benchmark_comps"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    asset_class: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    location: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    source_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    closed_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    sale_price: Mapped[float] = mapped_column(Float, nullable=False)
+    net_operating_income: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cap_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    projected_irr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    equity_multiple: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_dscr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    occupancy_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    leverage_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
