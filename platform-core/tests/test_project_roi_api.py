@@ -174,6 +174,75 @@ class ProjectRoiApiTests(unittest.TestCase):
         self.assertIn("recommendation", payload)
         self.assertIn(payload["recommendation"]["recommendation"], {"invest", "watch", "reject"})
         self.assertGreaterEqual(len(payload["recommendation"]["rationale"]), 1)
+        self.assertIn("action_items", payload["recommendation"])
+        self.assertGreaterEqual(len(payload["recommendation"]["action_items"]), 1)
+
+    def test_create_and_list_project_roi_recommendations(self) -> None:
+        response = self.client.post(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/roi-base-sunbelt/recommendations",
+            headers=self.auth_headers(
+                user_id="user-analyst-demo",
+                email="analyst@example.com",
+                full_name="Analyst Demo",
+                role="analyst",
+                tenant_id="tenant-torilaure",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        recommendation_record = response.json()
+        self.assertEqual(recommendation_record["scenario_id"], "roi-base-sunbelt")
+        self.assertEqual(recommendation_record["project_id"], "proj-roi-sunbelt")
+        self.assertEqual(recommendation_record["tenant_id"], "tenant-torilaure")
+        self.assertEqual(recommendation_record["created_by"], "user-analyst-demo")
+        self.assertIn(recommendation_record["recommendation"]["recommendation"], {"invest", "watch", "reject"})
+        self.assertGreaterEqual(len(recommendation_record["recommendation"]["action_items"]), 1)
+
+        list_response = self.client.get(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/roi-base-sunbelt/recommendations",
+            headers=self.auth_headers(
+                user_id="user-analyst-demo",
+                email="analyst@example.com",
+                full_name="Analyst Demo",
+                role="analyst",
+                tenant_id="tenant-torilaure",
+            ),
+        )
+
+        self.assertEqual(list_response.status_code, 200)
+        items = list_response.json()
+        self.assertTrue(len(items) >= 1)
+        self.assertEqual(items[0]["scenario_id"], "roi-base-sunbelt")
+
+    def test_download_project_roi_recommendations_pdf(self) -> None:
+        # create a recommendation first
+        create_response = self.client.post(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/roi-base-sunbelt/recommendations",
+            headers=self.auth_headers(
+                user_id="user-analyst-demo",
+                email="analyst@example.com",
+                full_name="Analyst Demo",
+                role="analyst",
+                tenant_id="tenant-torilaure",
+            ),
+        )
+        self.assertEqual(create_response.status_code, 201)
+
+        pdf_response = self.client.get(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/roi-base-sunbelt/recommendations/pdf",
+            headers=self.auth_headers(
+                user_id="user-analyst-demo",
+                email="analyst@example.com",
+                full_name="Analyst Demo",
+                role="analyst",
+                tenant_id="tenant-torilaure",
+            ),
+        )
+
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertEqual(pdf_response.headers["content-type"], "application/pdf")
+        self.assertIn("attachment; filename=roi-recommendations-proj-roi-sunbelt-roi-base-sunbelt.pdf", pdf_response.headers["content-disposition"])
+        self.assertGreater(len(pdf_response.content), 100)
 
     def test_analyze_roi_scenario_returns_diagnostics_and_stress_cases(self) -> None:
         response = self.client.post(

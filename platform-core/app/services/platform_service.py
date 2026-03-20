@@ -26,6 +26,7 @@ from app.schemas.roi import (
     RoiScenarioCalculationResponse,
     RoiScenarioCreate,
     RoiScenarioInput,
+    RoiScenarioRecommendation,
     RoiScenarioSummary,
     RoiSensitivityResponse,
     RoiScenarioUpdate,
@@ -51,6 +52,7 @@ class PlatformService:
         self._roi_scenarios: list[RoiScenarioSummary] = []
         self._roi_actuals: list[RoiActualSummary] = []
         self._benchmark_comps: list[RoiBenchmarkCompSummary] = []
+        self._roi_recommendations: list[RoiScenarioRecommendation] = []
 
     def list_projects(self, user: AuthUser) -> list[ProjectSummary]:
         """Return all shared projects."""
@@ -157,6 +159,109 @@ class PlatformService:
             best_risk_adjusted_score=top_ranked.risk_adjusted_score if top_ranked else None,
             scenario_rankings=rankings,
         )
+
+    def list_project_roi_recommendations(self, project_id: str, scenario_id: str, user: AuthUser) -> list[RoiScenarioRecommendation]:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        authorization_service.require_project_access(user, project)
+        return [
+            rec
+            for rec in self._roi_recommendations
+            if rec.project_id == project_id and rec.tenant_id == user.tenant_id and rec.scenario_id == scenario_id
+        ]
+
+    def create_project_roi_recommendation(self, project_id: str, scenario_id: str, user: AuthUser) -> RoiScenarioRecommendation:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        authorization_service.require_project_access(user, project)
+        scenario = self.get_project_roi_scenario(project_id, scenario_id, user)
+        if scenario is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI scenario not found.")
+        payload = RoiScenarioInput.model_validate(scenario.model_dump())
+        analysis = roi_analysis_service.build_analysis(payload)
+        recommendation = roi_analysis_service.build_recommendation(payload, analysis)
+        rec = RoiScenarioRecommendation(
+            scenario_id=scenario_id,
+            project_id=project_id,
+            tenant_id=user.tenant_id,
+            created_by=user.id,
+            created_at=datetime.now(UTC),
+            recommendation=recommendation,
+        )
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.create_project_roi_recommendation(rec)
+            except SQLAlchemyError:
+                pass
+        self._roi_recommendations.append(rec)
+        return rec
+
+    def list_project_roi_recommendations(self, project_id: str, scenario_id: str, user: AuthUser) -> list[RoiScenarioRecommendation]:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        authorization_service.require_project_access(user, project)
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.list_project_roi_recommendations(
+                    tenant_id=user.tenant_id,
+                    project_id=project_id,
+                    scenario_id=scenario_id,
+                )
+            except SQLAlchemyError:
+                pass
+        return [
+            rec
+            for rec in self._roi_recommendations
+            if rec.project_id == project_id and rec.tenant_id == user.tenant_id and rec.scenario_id == scenario_id
+        ]
+
+    def get_project_roi_recommendations_pdf(self, project_id: str, scenario_id: str, user: AuthUser) -> bytes:
+        from io import BytesIO
+
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+        recommendations = self.list_project_roi_recommendations(project_id, scenario_id, user)
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        flowables = []
+
+        flowables.append(Paragraph("ROI Scenario Recommendations", styles["Title"]))
+        flowables.append(Spacer(1, 16))
+        flowables.append(Paragraph(f"Project: {project_id}", styles["Normal"]))
+        flowables.append(Paragraph(f"Scenario: {scenario_id}", styles["Normal"]))
+        flowables.append(Spacer(1, 12))
+
+        if not recommendations:
+            flowables.append(Paragraph("No recommendations available.", styles["Normal"]))
+        else:
+            for idx, rec in enumerate(recommendations, start=1):
+                flowables.append(Paragraph(f"Recommendation #{idx}", styles["Heading2"]))
+                rec_summary = rec.recommendation
+                flowables.append(Paragraph(f"Decision: {rec_summary.recommendation}", styles["Normal"]))
+                flowables.append(Paragraph(f"Conviction: {rec_summary.conviction}", styles["Normal"]))
+                flowables.append(Paragraph(f"Score: {rec_summary.score:.2f}", styles["Normal"]))
+                flowables.append(Paragraph("Rationale:", styles["Normal"]))
+                for rationale in rec_summary.rationale:
+                    flowables.append(Paragraph(f"- {rationale}", styles["Bullet"]))
+                flowables.append(Paragraph("Required assumption checks:", styles["Normal"]))
+                for check in rec_summary.required_assumption_checks:
+                    flowables.append(Paragraph(f"- {check}", styles["Bullet"]))
+                if rec_summary.action_items:
+                    flowables.append(Paragraph("Action items:", styles["Normal"]))
+                    for item in rec_summary.action_items:
+                        flowables.append(Paragraph(f"- {item}", styles["Bullet"]))
+                flowables.append(Spacer(1, 12))
+
+        doc.build(flowables)
+        pdf_bytes = buffer.getvalue()
+        buffer.close()
+        return pdf_bytes
 
     def calculate_project_roi_scenario(
         self,

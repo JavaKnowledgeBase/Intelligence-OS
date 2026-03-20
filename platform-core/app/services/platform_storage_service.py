@@ -34,7 +34,7 @@ from app.schemas.listing import ListingCreate, ListingSummary
 from app.schemas.market import MarketInsight, MarketInsightCreate
 from app.schemas.note import ProjectNoteSummary
 from app.schemas.project import ProjectSummary
-from app.schemas.roi import RoiActualSummary, RoiBenchmarkCompSummary, RoiScenarioSummary
+from app.schemas.roi import RoiActualSummary, RoiBenchmarkCompSummary, RoiScenarioRecommendation, RoiScenarioSummary
 
 
 logger = logging.getLogger("torilaure.platform.persistence")
@@ -406,6 +406,33 @@ class PlatformStorageService:
             session.flush()
             session.refresh(record)
             return self._to_roi_actual_summary(record)
+
+    def list_project_roi_recommendations(
+        self,
+        *,
+        tenant_id: str,
+        project_id: str,
+        scenario_id: str,
+    ) -> list[RoiScenarioRecommendation]:
+        with self.session_scope() as session:
+            records = session.scalars(
+                select(ProjectRoiScenarioRecommendationRecord)
+                .where(
+                    ProjectRoiScenarioRecommendationRecord.tenant_id == tenant_id,
+                    ProjectRoiScenarioRecommendationRecord.project_id == project_id,
+                    ProjectRoiScenarioRecommendationRecord.scenario_id == scenario_id,
+                )
+                .order_by(ProjectRoiScenarioRecommendationRecord.created_at.desc())
+            ).all()
+            return [self._to_roi_scenario_recommendation(record) for record in records]
+
+    def create_project_roi_recommendation(self, recommendation: RoiScenarioRecommendation) -> RoiScenarioRecommendation:
+        with self.session_scope() as session:
+            record = ProjectRoiScenarioRecommendationRecord(**recommendation.model_dump())
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return self._to_roi_scenario_recommendation(record)
 
     def list_benchmark_comps(self, tenant_id: str, asset_class: str | None = None) -> list[RoiBenchmarkCompSummary]:
         with self.session_scope() as session:
@@ -838,16 +865,16 @@ class PlatformStorageService:
             cash_on_cash_multiple=record.cash_on_cash_multiple,
             equity_multiple=record.equity_multiple,
             unlevered_equity_multiple=record.unlevered_equity_multiple,
-            average_annual_fcff=record.average_annual_fcff,
-            average_annual_fcfe=record.average_annual_fcfe,
-            average_cash_on_cash_return=record.average_cash_on_cash_return,
-            first_year_cash_on_cash_return=record.first_year_cash_on_cash_return,
-            cap_rate_on_cost=record.cap_rate_on_cost,
-            average_dscr=record.average_dscr,
-            minimum_dscr=record.minimum_dscr,
-            payback_period_years=record.payback_period_years,
+        )
+
+    def _to_roi_scenario_recommendation(self, record: ProjectRoiScenarioRecommendationRecord) -> RoiScenarioRecommendation:
+        return RoiScenarioRecommendation(
+            scenario_id=record.scenario_id,
+            project_id=record.project_id,
+            tenant_id=record.tenant_id,
+            created_by=record.created_by,
             created_at=record.created_at,
-            updated_at=record.updated_at,
+            recommendation=RoiRecommendationSummary.model_validate(record.recommendation),
         )
 
     def _to_auth_user(self, record: UserRecord) -> AuthUser:

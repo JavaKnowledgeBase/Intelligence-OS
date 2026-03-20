@@ -6,13 +6,16 @@ import {
   buildProjectRoiSensitivity,
   calculateProjectRoiScenario,
   createProjectNote,
+  createProjectRoiRecommendation,
   createProjectRoiScenario,
   deleteProjectNote,
   deleteProjectRoiScenario,
   downloadProjectDocument,
   fetchProjectDocumentPreview,
+  listProjectRoiRecommendations,
   fetchProjectMembers,
   fetchProjectRoiSnapshot,
+  downloadProjectRoiRecommendationsPDF,
   fetchProjectWorkspace,
   removeProjectMember,
   updateProjectRoiScenario,
@@ -128,6 +131,9 @@ export function ProjectDetailPage() {
   const [isSavingRoi, setIsSavingRoi] = useState(false);
   const [roiPreview, setRoiPreview] = useState(null);
   const [roiSensitivity, setRoiSensitivity] = useState(null);
+  const [roiRecommendations, setRoiRecommendations] = useState([]);
+  const [selectedRoiScenarioId, setSelectedRoiScenarioId] = useState("");
+  const [isSavingRoiRecommendation, setIsSavingRoiRecommendation] = useState(false);
   const [memberEmail, setMemberEmail] = useState("");
   const [previewState, setPreviewState] = useState({ title: "", text: "", isLoading: false, isOpen: false });
 
@@ -153,6 +159,12 @@ export function ProjectDetailPage() {
           return;
         }
         setWorkspace((current) => ({ ...(current ?? data), members, roi_snapshot: roiSnapshot }));
+
+        const firstScenarioId = (data.roi_scenarios && data.roi_scenarios[0]?.id) || "";
+        setSelectedRoiScenarioId(firstScenarioId);
+        if (firstScenarioId) {
+          await loadRoiRecommendationsForScenario(firstScenarioId);
+        }
       } catch (error) {
         if (!isMounted) {
           return;
@@ -487,6 +499,38 @@ export function ProjectDetailPage() {
       setErrorMessage(error instanceof Error ? error.message : "Unable to build the ROI sensitivity analysis.");
     } finally {
       setIsSavingRoi(false);
+    }
+  }
+
+  async function loadRoiRecommendationsForScenario(scenarioId) {
+    if (!scenarioId) {
+      setRoiRecommendations([]);
+      return;
+    }
+    try {
+      setErrorMessage("");
+      const items = await listProjectRoiRecommendations(projectId, scenarioId);
+      setRoiRecommendations(items);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to load ROI recommendations.");
+    }
+  }
+
+  async function handleCreateRoiRecommendation(scenarioId) {
+    if (!scenarioId) {
+      setErrorMessage("Pick a scenario first.");
+      return;
+    }
+
+    try {
+      setIsSavingRoiRecommendation(true);
+      setErrorMessage("");
+      await createProjectRoiRecommendation(projectId, scenarioId);
+      await loadRoiRecommendationsForScenario(scenarioId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to create the ROI recommendation.");
+    } finally {
+      setIsSavingRoiRecommendation(false);
     }
   }
 
@@ -966,6 +1010,89 @@ export function ProjectDetailPage() {
               </div>
             </div>
           ) : null}
+          <div className="project-summary-grid" style={{ marginBottom: "1rem" }}>
+            <label>
+              Recommendation scenario
+              <select
+                className="login-select"
+                value={selectedRoiScenarioId}
+                onChange={(event) => {
+                  setSelectedRoiScenarioId(event.target.value);
+                  loadRoiRecommendationsForScenario(event.target.value);
+                }}
+              >
+                <option value="">Select scenario</option>
+                {(workspace?.roi_scenarios ?? []).map((scenario) => (
+                  <option key={scenario.id} value={scenario.id}>
+                    {scenario.name} ({scenario.scenario_type})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => handleCreateRoiRecommendation(selectedRoiScenarioId)}
+                disabled={isSavingRoiRecommendation || !selectedRoiScenarioId}
+              >
+                {isSavingRoiRecommendation ? "Saving..." : "Capture recommendation"}
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={async () => {
+                  try {
+                    setErrorMessage("");
+                    const blob = await downloadProjectRoiRecommendationsPDF(projectId, selectedRoiScenarioId);
+                    const url = window.URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `roi-recommendations-${projectId}-${selectedRoiScenarioId}.pdf`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(url);
+                  } catch (err) {
+                    setErrorMessage(err instanceof Error ? err.message : "Unable to download ROI recommendations PDF.");
+                  }
+                }}
+                disabled={!selectedRoiScenarioId}
+              >
+                Download PDF
+              </button>
+            </div>
+          </div>
+
+          <div className="note-list">
+            <h4>ROI Recommendations</h4>
+            {roiRecommendations && roiRecommendations.length > 0 ? (
+              roiRecommendations.map((recommendation) => (
+                <article key={recommendation.created_at} className="note-card">
+                  <div className="note-card-header">
+                    <div>
+                      <strong>{recommendation.recommendation.recommendation.toUpperCase()}</strong>
+                      <small>{new Date(recommendation.created_at).toLocaleString()}</small>
+                    </div>
+                  </div>
+                  <p>
+                    Conviction: {recommendation.recommendation.conviction} | Score: {recommendation.recommendation.score.toFixed(1)}
+                  </p>
+                  <p>{recommendation.recommendation.rationale.join(" ")}</p>
+                  {recommendation.recommendation.action_items?.length ? (
+                    <ul>
+                      {recommendation.recommendation.action_items.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </article>
+              ))
+            ) : (
+              <p className="hint-text">No recommendations for the selected scenario yet.</p>
+            )}
+          </div>
+
           <div className="note-list">
             {(workspace?.roi_scenarios ?? []).map((scenario) => (
               <article key={scenario.id} className="note-card">

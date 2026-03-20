@@ -303,6 +303,30 @@ class ProjectRoiScenarioRecord(Base):
     )
 
 
+class ProjectRoiScenarioRecommendationRecord(Base):
+    """Saved analyst recommendation with action and audit metadata."""
+
+    __tablename__ = "project_roi_scenario_recommendations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    scenario_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("project_roi_scenarios.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    recommendation: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
 class ProjectRoiActualRecord(Base):
     """Persisted realized operating results used for variance analysis against an ROI scenario."""
 

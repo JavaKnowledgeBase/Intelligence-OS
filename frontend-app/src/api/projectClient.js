@@ -99,6 +99,19 @@ export async function deleteProjectRoiScenario(projectId, scenarioId) {
   }
 }
 
+export async function createProjectRoiRecommendation(projectId, scenarioId) {
+  const response = await authenticatedFetch(`/projects/${projectId}/roi-scenarios/${scenarioId}/recommendations`, {
+    method: "POST",
+  });
+
+  return readJsonOrThrow(response, "Unable to create the ROI recommendation.");
+}
+
+export async function listProjectRoiRecommendations(projectId, scenarioId) {
+  const response = await authenticatedFetch(`/projects/${projectId}/roi-scenarios/${scenarioId}/recommendations`);
+  return readJsonOrThrow(response, "Unable to load ROI recommendations.");
+}
+
 export async function addProjectMember(projectId, email) {
   const response = await authenticatedFetch(`/projects/${projectId}/members`, {
     method: "POST",
@@ -193,4 +206,15 @@ export async function downloadProjectDocument(projectId, documentId) {
 export async function fetchProjectDocumentPreview(projectId, documentId) {
   const response = await authenticatedFetch(`/projects/${projectId}/documents/${documentId}/preview`);
   return readJsonOrThrow(response, "Unable to load the project document preview.");
+}
+
+export async function downloadProjectRoiRecommendationsPDF(projectId, scenarioId) {
+  const response = await authenticatedFetch(`/projects/${projectId}/roi-scenarios/${scenarioId}/recommendations/pdf`);
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? "Unable to download ROI recommendations PDF.");
+  }
+
+  return response.blob();
 }

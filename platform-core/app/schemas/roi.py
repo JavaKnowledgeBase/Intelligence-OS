@@ -355,6 +355,7 @@ class RoiRecommendationSummary(BaseModel):
     score: float
     rationale: list[str]
     required_assumption_checks: list[str]
+    action_items: list[str] = []
 
 
 class RoiScenarioRankingItem(BaseModel):
@@ -370,6 +371,15 @@ class RoiScenarioRankingItem(BaseModel):
     recommendation: Literal["invest", "watch", "reject"] | None = None
     probability_negative_npv: float | None = None
     probability_dscr_below_one: float | None = None
+
+
+class RoiScenarioRecommendation(BaseModel):
+    scenario_id: str
+    project_id: str
+    tenant_id: str
+    created_by: str
+    created_at: datetime
+    recommendation: RoiRecommendationSummary
 
 
 class RoiActualCreate(BaseModel):

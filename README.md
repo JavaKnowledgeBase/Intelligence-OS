@@ -131,6 +131,29 @@ Implemented self-service auth:
 - `Architecture`: system blueprint for the platform foundation
 - `About`: in-app references to setup, security, architecture, and OAuth planning docs
 
+## New ROI Recommendation + PDF Export Features
+
+Implemented in recent dev work:
+
+- Backend ROI pipeline includes:
+  - `/projects/{id}/roi-scenarios/calculate` for scenario preview + analysis + recommendation
+  - `/projects/{id}/roi-scenarios/analyze` for full risk/stress diagnostic output
+  - `/projects/{id}/roi-scenarios/{scenario_id}/recommendations` (POST/GET) for persisted analyst recommendation audit
+  - `/projects/{id}/roi-scenarios/{scenario_id}/recommendations/pdf` (GET) for downloadable PDF of recommendations
+- Recommendation model persists `RoiScenarioRecommendation` with `RoiRecommendationSummary` fields:
+  - `recommendation` (`invest/watch/reject`), `conviction`, `score`
+  - `rationale`, `required_assumption_checks`, `action_items`
+- Persistence in `platform_storage_service`, with new SQLAlchemy table `ProjectRoiScenarioRecommendationRecord` and Alembic migration
+- PDF generator in `platform_service.get_project_roi_recommendations_pdf(...)` using ReportLab
+- Frontend support in `frontend-app/src/api/projectClient.js` and `ProjectDetailPage.jsx` with create/list recommendation and download button
+- Automated tests added in `platform-core/tests/test_project_roi_api.py` (including PDF endpoint)
+
+### Dev workflow notes
+
+- New dependency: `reportlab` in `platform-core/requirements.txt`
+- Regression test command: `pytest -q` (now 13 passed)
+- New migration script in `alembic/versions` to apply before startup
+
 ## Suggested Next Steps
 
 1. Add external connectors for broker feeds, CRM exports, and market data providers.

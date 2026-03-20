@@ -1,5 +1,8 @@
+import io
+
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
+from starlette.responses import StreamingResponse
 
 from app.api.deps import get_current_user
 from app.schemas.auth import AuthUser
@@ -19,6 +22,7 @@ from app.schemas.roi import (
     RoiScenarioAnalysisResponse,
     RoiScenarioCalculationResponse,
     RoiScenarioCreate,
+    RoiScenarioRecommendation,
     RoiScenarioSummary,
     RoiScenarioUpdate,
     RoiSensitivityResponse,
@@ -195,6 +199,43 @@ def get_project_roi_snapshot(
 ) -> RoiPortfolioSnapshot:
     """Return an aggregate ROI snapshot for the project."""
     return platform_service.get_project_roi_snapshot(project_id, current_user)
+
+
+@router.post("/{project_id}/roi-scenarios/{scenario_id}/recommendations", response_model=RoiScenarioRecommendation, status_code=201)
+def create_project_roi_recommendation(
+    project_id: str,
+    scenario_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiScenarioRecommendation:
+    """Persist a recommendation action checklist for an existing ROI scenario."""
+    return platform_service.create_project_roi_recommendation(project_id, scenario_id, current_user)
+
+
+@router.get("/{project_id}/roi-scenarios/{scenario_id}/recommendations/pdf")
+def download_project_roi_recommendations_pdf(
+    project_id: str,
+    scenario_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> StreamingResponse:
+    """Return a PDF export of recommendations for a scenario."""
+    pdf_bytes = platform_service.get_project_roi_recommendations_pdf(project_id, scenario_id, current_user)
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=roi-recommendations-{project_id}-{scenario_id}.pdf",
+        },
+    )
+
+
+@router.get("/{project_id}/roi-scenarios/{scenario_id}/recommendations", response_model=list[RoiScenarioRecommendation])
+def list_project_roi_recommendations(
+    project_id: str,
+    scenario_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> list[RoiScenarioRecommendation]:
+    """Return persisted recommendations for a scenario to support audit and workflow tracking."""
+    return platform_service.list_project_roi_recommendations(project_id, scenario_id, current_user)
 
 
 @router.post("/{project_id}/roi-scenarios/calculate", response_model=RoiScenarioCalculationResponse)

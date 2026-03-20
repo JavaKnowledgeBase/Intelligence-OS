@@ -456,12 +456,28 @@ class RoiAnalysisService:
         if not required_assumption_checks:
             required_assumption_checks.append("No critical model gaps surfaced from the current analysis set.")
 
+        # Derive explicit, actionable items for analysts from risk signals.
+        action_items: list[str] = []
+        if analysis.risk_flags:
+            for flag in analysis.risk_flags:
+                action_items.append(f"{flag.severity.title()} risk flag {flag.code}: {flag.detail}")
+        if analysis.benchmark_assessment.overall_assessment == "underperform":
+            action_items.append("Benchmark assessment suggests underlying assumptions are conservative; either improve performance levers or reprice the opportunity.")
+        if analysis.valuation_sanity.terminal_value_dependency == "critical":
+            action_items.append("Terminal value dependency is critical; get independent exit cap validation and adjust hold-period sensitivity.")
+        if analysis.governance_risk.governance_risk != "low":
+            action_items.append("Ramp up governance due diligence while progressing deal team approval.")
+
+        if not action_items:
+            action_items.append("No urgent action items detected, proceed with standard diligence.")
+
         return RoiRecommendationSummary(
             recommendation=recommendation,
             conviction=conviction,
             score=round(score, 2),
             rationale=rationale[:4],
             required_assumption_checks=required_assumption_checks[:4],
+            action_items=action_items[:4],
         )
 
     def build_ranking_item(self, scenario: RoiScenarioSummary) -> RoiScenarioRankingItem:
