@@ -711,6 +711,7 @@ a {
 .document-card p,
 .document-meta small,
 .note-card p,
+.note-card small,
 .activity-card p,
 .activity-card small,
 .member-card p,
@@ -727,11 +728,49 @@ a {
   margin-top: 20px;
 }
 
+.roi-summary-grid,
+.roi-scenario-grid {
+  margin-top: 20px;
+}
+
 .note-card strong,
 .activity-card strong {
   display: block;
   margin-bottom: 10px;
   color: #eef4fb;
+}
+
+.note-card-header,
+.note-card-actions,
+.note-edit-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.note-card-header {
+  margin-bottom: 12px;
+}
+
+.note-card-header small {
+  display: block;
+  margin-top: 4px;
+}
+
+.note-card-actions,
+.note-edit-actions {
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.note-edit-form {
+  display: grid;
+  gap: 12px;
+}
+
+.text-button-danger {
+  color: #fecaca;
 }
 
 .activity-card small {

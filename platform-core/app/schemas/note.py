@@ -15,9 +15,16 @@ class ProjectNoteSummary(BaseModel):
     id: str
     project_id: str
     tenant_id: str
+    author_id: str
     author_name: str
     content: str
     created_at: datetime | None = None
+
+
+class ProjectNoteUpdate(BaseModel):
+    """Payload for updating a project note."""
+
+    content: str = Field(min_length=3, max_length=5000)
 
 
 class ProjectActivityItem(BaseModel):

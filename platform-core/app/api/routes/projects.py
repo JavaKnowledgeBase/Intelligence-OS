@@ -4,13 +4,21 @@ from fastapi.responses import FileResponse
 from app.api.deps import get_current_user
 from app.schemas.auth import AuthUser
 from app.schemas.document import ProjectDocumentPreview, ProjectDocumentSummary, ProjectDocumentUploadResponse
-from app.schemas.note import ProjectNoteCreate, ProjectNoteSummary
+from app.schemas.note import ProjectNoteCreate, ProjectNoteSummary, ProjectNoteUpdate
 from app.schemas.project import (
     PlatformOverview,
     ProjectCreate,
     ProjectMemberAdd,
     ProjectSummary,
     ProjectWorkspace,
+)
+from app.schemas.roi import (
+    RoiPortfolioSnapshot,
+    RoiScenarioCalculationResponse,
+    RoiScenarioCreate,
+    RoiScenarioSummary,
+    RoiScenarioUpdate,
+    RoiSensitivityResponse,
 )
 from app.services.project_document_service import project_document_service
 from app.services.platform_service import platform_service
@@ -143,6 +151,98 @@ def create_project_note(
 ) -> ProjectNoteSummary:
     """Create a note in a project workspace."""
     return platform_service.create_project_note(project_id, payload, current_user)
+
+
+@router.put("/{project_id}/notes/{note_id}", response_model=ProjectNoteSummary)
+def update_project_note(
+    project_id: str,
+    note_id: str,
+    payload: ProjectNoteUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> ProjectNoteSummary:
+    """Update an existing project note."""
+    return platform_service.update_project_note(project_id, note_id, payload, current_user)
+
+
+@router.delete("/{project_id}/notes/{note_id}", status_code=204)
+def delete_project_note(
+    project_id: str,
+    note_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> Response:
+    """Delete a project note."""
+    platform_service.delete_project_note(project_id, note_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{project_id}/roi-scenarios", response_model=list[RoiScenarioSummary])
+def list_project_roi_scenarios(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> list[RoiScenarioSummary]:
+    """Return saved ROI scenarios for an authorized project."""
+    return platform_service.list_project_roi_scenarios(project_id, current_user)
+
+
+@router.get("/{project_id}/roi-snapshot", response_model=RoiPortfolioSnapshot)
+def get_project_roi_snapshot(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiPortfolioSnapshot:
+    """Return an aggregate ROI snapshot for the project."""
+    return platform_service.get_project_roi_snapshot(project_id, current_user)
+
+
+@router.post("/{project_id}/roi-scenarios/calculate", response_model=RoiScenarioCalculationResponse)
+def calculate_project_roi_scenario(
+    project_id: str,
+    payload: RoiScenarioCreate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiScenarioCalculationResponse:
+    """Preview calculated ROI outputs without saving a scenario."""
+    return platform_service.calculate_project_roi_scenario(project_id, payload, current_user)
+
+
+@router.post("/{project_id}/roi-scenarios/sensitivity", response_model=RoiSensitivityResponse)
+def build_project_roi_sensitivity(
+    project_id: str,
+    payload: RoiScenarioCreate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiSensitivityResponse:
+    """Return a sensitivity matrix for core ROI drivers."""
+    return platform_service.build_project_roi_sensitivity(project_id, payload, current_user)
+
+
+@router.post("/{project_id}/roi-scenarios", response_model=RoiScenarioSummary, status_code=201)
+def create_project_roi_scenario(
+    project_id: str,
+    payload: RoiScenarioCreate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiScenarioSummary:
+    """Create and persist a project ROI scenario."""
+    return platform_service.create_project_roi_scenario(project_id, payload, current_user)
+
+
+@router.put("/{project_id}/roi-scenarios/{scenario_id}", response_model=RoiScenarioSummary)
+def update_project_roi_scenario(
+    project_id: str,
+    scenario_id: str,
+    payload: RoiScenarioUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiScenarioSummary:
+    """Update a persisted project ROI scenario."""
+    return platform_service.update_project_roi_scenario(project_id, scenario_id, payload, current_user)
+
+
+@router.delete("/{project_id}/roi-scenarios/{scenario_id}", status_code=204)
+def delete_project_roi_scenario(
+    project_id: str,
+    scenario_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> Response:
+    """Delete a persisted project ROI scenario."""
+    platform_service.delete_project_roi_scenario(project_id, scenario_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{project_id}", response_model=ProjectSummary)

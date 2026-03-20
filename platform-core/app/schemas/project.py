@@ -8,6 +8,7 @@ from app.schemas.document import ProjectDocumentSummary
 from app.schemas.listing import ListingSummary
 from app.schemas.market import MarketInsight
 from app.schemas.note import ProjectActivityItem, ProjectNoteSummary
+from app.schemas.roi import RoiPortfolioSnapshot, RoiScenarioSummary
 
 
 class ProjectCreate(BaseModel):
@@ -62,6 +63,8 @@ class ProjectWorkspace(BaseModel):
     alerts: list[AlertPreference]
     documents: list[ProjectDocumentSummary]
     notes: list[ProjectNoteSummary]
+    roi_scenarios: list[RoiScenarioSummary]
+    roi_snapshot: RoiPortfolioSnapshot
     activity: list[ProjectActivityItem]
 
 

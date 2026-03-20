@@ -12,11 +12,21 @@ from app.schemas.auth import AuthUser
 from app.schemas.document import ProjectDocumentSummary
 from app.schemas.listing import DealSearchResponse, ListingCreate, ListingSummary
 from app.schemas.market import MarketInsight, MarketInsightCreate
-from app.schemas.note import ProjectActivityItem, ProjectNoteCreate, ProjectNoteSummary
+from app.schemas.note import ProjectActivityItem, ProjectNoteCreate, ProjectNoteSummary, ProjectNoteUpdate
 from app.schemas.project import PlatformOverview, ProjectCreate, ProjectMemberAdd, ProjectSummary, ProjectWorkspace
+from app.schemas.roi import (
+    RoiPortfolioSnapshot,
+    RoiScenarioCalculationResponse,
+    RoiScenarioCreate,
+    RoiScenarioInput,
+    RoiScenarioSummary,
+    RoiSensitivityResponse,
+    RoiScenarioUpdate,
+)
 from app.services.authorization_service import authorization_service
 from app.services.platform_storage_service import platform_storage_service
 from app.services.project_document_service import project_document_service
+from app.services.roi_analysis_service import roi_analysis_service
 from app.services.user_storage_service import user_storage_service
 
 
@@ -29,6 +39,7 @@ class PlatformService:
         self._listings: list[ListingSummary] = []
         self._market_insights: list[MarketInsight] = []
         self._alerts: list[AlertPreference] = []
+        self._roi_scenarios: list[RoiScenarioSummary] = []
 
     def list_projects(self, user: AuthUser) -> list[ProjectSummary]:
         """Return all shared projects."""
@@ -75,6 +86,7 @@ class PlatformService:
         listings = [listing for listing in self.list_listings(user) if listing.project_id == project_id]
         documents = self.list_project_documents(project_id, user)
         notes = self.list_project_notes(project_id, user)
+        roi_scenarios = self.list_project_roi_scenarios(project_id, user)
         return ProjectWorkspace(
             project=project,
             members=self.list_project_members(project_id, user),
@@ -83,8 +95,162 @@ class PlatformService:
             alerts=self.list_alerts(user),
             documents=documents,
             notes=notes,
+            roi_scenarios=roi_scenarios,
+            roi_snapshot=self.get_project_roi_snapshot(project_id, user),
             activity=self._build_project_activity(project, documents, notes),
         )
+
+    def list_project_roi_scenarios(self, project_id: str, user: AuthUser) -> list[RoiScenarioSummary]:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.list_project_roi_scenarios(user.tenant_id, project_id)
+            except SQLAlchemyError:
+                pass
+        return [scenario for scenario in self._roi_scenarios if scenario.project_id == project_id and scenario.tenant_id == user.tenant_id]
+
+    def get_project_roi_snapshot(self, project_id: str, user: AuthUser) -> RoiPortfolioSnapshot:
+        scenarios = self.list_project_roi_scenarios(project_id, user)
+        base_case = next((item for item in scenarios if item.scenario_type == "base"), None)
+        upside_case = next((item for item in scenarios if item.scenario_type == "upside"), None)
+        downside_case = next((item for item in scenarios if item.scenario_type == "downside"), None)
+        irr_values = [item.projected_irr for item in scenarios if item.projected_irr is not None]
+        npv_values = [item.projected_npv for item in scenarios]
+        return RoiPortfolioSnapshot(
+            scenario_count=len(scenarios),
+            base_case_irr=base_case.projected_irr if base_case else None,
+            upside_case_irr=upside_case.projected_irr if upside_case else None,
+            downside_case_irr=downside_case.projected_irr if downside_case else None,
+            best_case_irr=max(irr_values) if irr_values else None,
+            average_npv=round(mean(npv_values), 2) if npv_values else None,
+            best_equity_multiple=max(
+                [item.equity_multiple for item in scenarios if item.equity_multiple is not None],
+                default=None,
+            ),
+            average_dscr=round(
+                mean([item.average_dscr for item in scenarios if item.average_dscr is not None]),
+                3,
+            )
+            if any(item.average_dscr is not None for item in scenarios)
+            else None,
+        )
+
+    def calculate_project_roi_scenario(
+        self,
+        project_id: str,
+        payload: RoiScenarioInput,
+        user: AuthUser,
+    ) -> RoiScenarioCalculationResponse:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        self._validate_roi_listing(project_id, payload.listing_id, user)
+        scenario = roi_analysis_service.to_summary(
+            scenario_id="preview",
+            project_id=project_id,
+            tenant_id=user.tenant_id,
+            payload=payload,
+        )
+        computed = roi_analysis_service.calculate(payload)
+        return RoiScenarioCalculationResponse(
+            scenario=scenario,
+            annual_cash_flows=computed.annual_cash_flows,
+            monthly_cash_flows=computed.monthly_cash_flows,
+        )
+
+    def build_project_roi_sensitivity(
+        self,
+        project_id: str,
+        payload: RoiScenarioInput,
+        user: AuthUser,
+    ) -> RoiSensitivityResponse:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        self._validate_roi_listing(project_id, payload.listing_id, user)
+        return roi_analysis_service.build_sensitivity(payload)
+
+    def create_project_roi_scenario(
+        self,
+        project_id: str,
+        payload: RoiScenarioCreate,
+        user: AuthUser,
+    ) -> RoiScenarioSummary:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        authorization_service.require_project_management(user, project)
+        self._validate_roi_listing(project_id, payload.listing_id, user)
+        scenario = roi_analysis_service.to_summary(
+            scenario_id=f"roi-{uuid4().hex[:8]}",
+            project_id=project_id,
+            tenant_id=user.tenant_id,
+            payload=payload,
+        )
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.create_project_roi_scenario(scenario)
+            except SQLAlchemyError:
+                pass
+        self._roi_scenarios.append(scenario)
+        return scenario
+
+    def update_project_roi_scenario(
+        self,
+        project_id: str,
+        scenario_id: str,
+        payload: RoiScenarioUpdate,
+        user: AuthUser,
+    ) -> RoiScenarioSummary:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        authorization_service.require_project_management(user, project)
+        self._validate_roi_listing(project_id, payload.listing_id, user)
+        scenario = roi_analysis_service.to_summary(
+            scenario_id=scenario_id,
+            project_id=project_id,
+            tenant_id=user.tenant_id,
+            payload=payload,
+        )
+        if platform_storage_service.is_available():
+            try:
+                updated = platform_storage_service.update_project_roi_scenario(scenario)
+            except SQLAlchemyError:
+                updated = None
+            if updated is not None:
+                return updated
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI scenario not found.")
+        for index, current in enumerate(self._roi_scenarios):
+            if current.id == scenario_id and current.project_id == project_id and current.tenant_id == user.tenant_id:
+                self._roi_scenarios[index] = scenario
+                return scenario
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI scenario not found.")
+
+    def delete_project_roi_scenario(self, project_id: str, scenario_id: str, user: AuthUser) -> None:
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        authorization_service.require_project_management(user, project)
+        if platform_storage_service.is_available():
+            try:
+                deleted = platform_storage_service.delete_project_roi_scenario(
+                    tenant_id=user.tenant_id,
+                    project_id=project_id,
+                    scenario_id=scenario_id,
+                )
+            except SQLAlchemyError:
+                deleted = False
+            if deleted:
+                return
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI scenario not found.")
+        for index, current in enumerate(self._roi_scenarios):
+            if current.id == scenario_id and current.project_id == project_id and current.tenant_id == user.tenant_id:
+                self._roi_scenarios.pop(index)
+                return
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI scenario not found.")
 
     def list_project_documents(self, project_id: str, user: AuthUser) -> list[ProjectDocumentSummary]:
         """Return metadata for documents attached to a project the user can access."""
@@ -115,11 +281,72 @@ class PlatformService:
                 return platform_storage_service.create_project_note(
                     project_id=project_id,
                     tenant_id=user.tenant_id,
+                    author_id=user.id,
                     author_name=user.full_name,
                     content=payload.content.strip(),
                 )
             except SQLAlchemyError:
                 pass
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Project note storage is not available.")
+
+    def update_project_note(
+        self,
+        project_id: str,
+        note_id: str,
+        payload: ProjectNoteUpdate,
+        user: AuthUser,
+    ) -> ProjectNoteSummary:
+        """Update a project note for an authorized user."""
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        if platform_storage_service.is_available():
+            try:
+                note = platform_storage_service.get_project_note(
+                    tenant_id=user.tenant_id,
+                    project_id=project_id,
+                    note_id=note_id,
+                )
+                if note is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project note not found.")
+                authorization_service.require_project_note_management(user, project, note)
+                updated = platform_storage_service.update_project_note(
+                    tenant_id=user.tenant_id,
+                    project_id=project_id,
+                    note_id=note_id,
+                    content=payload.content.strip(),
+                )
+            except SQLAlchemyError:
+                updated = None
+            if updated is not None:
+                return updated
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project note not found.")
+
+    def delete_project_note(self, project_id: str, note_id: str, user: AuthUser) -> None:
+        """Delete a project note for an authorized user."""
+        project = self.get_project(project_id, user)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+        if platform_storage_service.is_available():
+            try:
+                note = platform_storage_service.get_project_note(
+                    tenant_id=user.tenant_id,
+                    project_id=project_id,
+                    note_id=note_id,
+                )
+                if note is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project note not found.")
+                authorization_service.require_project_note_management(user, project, note)
+                deleted = platform_storage_service.delete_project_note(
+                    tenant_id=user.tenant_id,
+                    project_id=project_id,
+                    note_id=note_id,
+                )
+            except SQLAlchemyError:
+                deleted = False
+            if deleted:
+                return
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project note not found.")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Project note storage is not available.")
 
     def list_project_members(self, project_id: str, user: AuthUser) -> list[AuthUser]:
@@ -431,6 +658,13 @@ class PlatformService:
             key=lambda item: item.occurred_at or datetime.min.replace(tzinfo=UTC),
             reverse=True,
         )
+
+    def _validate_roi_listing(self, project_id: str, listing_id: str | None, user: AuthUser) -> None:
+        if listing_id is None:
+            return
+        listing = next((item for item in self.list_listings(user) if item.id == listing_id), None)
+        if listing is None or listing.project_id != project_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ROI scenario listing must belong to this project.")
 
 
 # Shared singleton for the API layer until dependency injection is introduced.

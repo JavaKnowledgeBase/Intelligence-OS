@@ -19,10 +19,11 @@ from app.models.platform_tables import (
     ProjectDocumentRecord,
     ProjectMemberRecord,
     ProjectNoteRecord,
+    ProjectRoiScenarioRecord,
     ProjectRecord,
     UserRecord,
 )
-from app.models.seed_data import ALERTS, LISTINGS, MARKET_INSIGHTS, PROJECTS
+from app.models.seed_data import ALERTS, LISTINGS, MARKET_INSIGHTS, PROJECTS, ROI_SCENARIOS
 from app.schemas.alert import AlertPreference, AlertPreferenceCreate, AlertPreferenceUpdate
 from app.schemas.auth import AuthUser
 from app.schemas.document import ProjectDocumentSummary
@@ -31,6 +32,7 @@ from app.schemas.listing import ListingCreate, ListingSummary
 from app.schemas.market import MarketInsight, MarketInsightCreate
 from app.schemas.note import ProjectNoteSummary
 from app.schemas.project import ProjectSummary
+from app.schemas.roi import RoiScenarioSummary
 
 
 logger = logging.getLogger("torilaure.platform.persistence")
@@ -55,6 +57,7 @@ class PlatformStorageService:
                 "ingestion_runs",
                 "project_documents",
                 "project_notes",
+                "project_roi_scenarios",
             }
             if not required_tables.issubset(set(inspector.get_table_names())):
                 raise SQLAlchemyError("Platform tables are missing. Run `alembic upgrade head`.")
@@ -236,6 +239,7 @@ class PlatformStorageService:
         *,
         project_id: str,
         tenant_id: str,
+        author_id: str,
         author_name: str,
         content: str,
     ) -> ProjectNoteSummary:
@@ -244,6 +248,7 @@ class PlatformStorageService:
                 id=f"note-{uuid4().hex[:8]}",
                 project_id=project_id,
                 tenant_id=tenant_id,
+                author_id=author_id,
                 author_name=author_name,
                 content=content,
             )
@@ -251,6 +256,57 @@ class PlatformStorageService:
             session.flush()
             session.refresh(record)
             return self._to_project_note_summary(record)
+
+    def get_project_note(self, *, tenant_id: str, project_id: str, note_id: str) -> ProjectNoteSummary | None:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(ProjectNoteRecord).where(
+                    ProjectNoteRecord.id == note_id,
+                    ProjectNoteRecord.project_id == project_id,
+                    ProjectNoteRecord.tenant_id == tenant_id,
+                )
+            )
+            if record is None:
+                return None
+            return self._to_project_note_summary(record)
+
+    def update_project_note(
+        self,
+        *,
+        tenant_id: str,
+        project_id: str,
+        note_id: str,
+        content: str,
+    ) -> ProjectNoteSummary | None:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(ProjectNoteRecord).where(
+                    ProjectNoteRecord.id == note_id,
+                    ProjectNoteRecord.project_id == project_id,
+                    ProjectNoteRecord.tenant_id == tenant_id,
+                )
+            )
+            if record is None:
+                return None
+            record.content = content
+            session.flush()
+            session.refresh(record)
+            return self._to_project_note_summary(record)
+
+    def delete_project_note(self, *, tenant_id: str, project_id: str, note_id: str) -> bool:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(ProjectNoteRecord).where(
+                    ProjectNoteRecord.id == note_id,
+                    ProjectNoteRecord.project_id == project_id,
+                    ProjectNoteRecord.tenant_id == tenant_id,
+                )
+            )
+            if record is None:
+                return False
+            session.delete(record)
+            session.flush()
+            return True
 
     def list_listings(self, tenant_id: str) -> list[ListingSummary]:
         with self.session_scope() as session:
@@ -260,6 +316,71 @@ class PlatformStorageService:
                 .order_by(ListingRecord.deal_score.desc(), ListingRecord.title.asc())
             ).all()
             return [self._to_listing_summary(record) for record in records]
+
+    def list_project_roi_scenarios(self, tenant_id: str, project_id: str) -> list[RoiScenarioSummary]:
+        with self.session_scope() as session:
+            records = session.scalars(
+                select(ProjectRoiScenarioRecord)
+                .where(
+                    ProjectRoiScenarioRecord.tenant_id == tenant_id,
+                    ProjectRoiScenarioRecord.project_id == project_id,
+                )
+                .order_by(ProjectRoiScenarioRecord.scenario_type.asc(), ProjectRoiScenarioRecord.name.asc())
+            ).all()
+            return [self._to_roi_scenario_summary(record) for record in records]
+
+    def get_project_roi_scenario(self, *, tenant_id: str, project_id: str, scenario_id: str) -> RoiScenarioSummary | None:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(ProjectRoiScenarioRecord).where(
+                    ProjectRoiScenarioRecord.id == scenario_id,
+                    ProjectRoiScenarioRecord.project_id == project_id,
+                    ProjectRoiScenarioRecord.tenant_id == tenant_id,
+                )
+            )
+            if record is None:
+                return None
+            return self._to_roi_scenario_summary(record)
+
+    def create_project_roi_scenario(self, scenario: RoiScenarioSummary) -> RoiScenarioSummary:
+        with self.session_scope() as session:
+            record = ProjectRoiScenarioRecord(**scenario.model_dump(exclude={"created_at", "updated_at"}))
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return self._to_roi_scenario_summary(record)
+
+    def update_project_roi_scenario(self, scenario: RoiScenarioSummary) -> RoiScenarioSummary | None:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(ProjectRoiScenarioRecord).where(
+                    ProjectRoiScenarioRecord.id == scenario.id,
+                    ProjectRoiScenarioRecord.project_id == scenario.project_id,
+                    ProjectRoiScenarioRecord.tenant_id == scenario.tenant_id,
+                )
+            )
+            if record is None:
+                return None
+            for field, value in scenario.model_dump(exclude={"created_at", "updated_at"}).items():
+                setattr(record, field, value)
+            session.flush()
+            session.refresh(record)
+            return self._to_roi_scenario_summary(record)
+
+    def delete_project_roi_scenario(self, *, tenant_id: str, project_id: str, scenario_id: str) -> bool:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(ProjectRoiScenarioRecord).where(
+                    ProjectRoiScenarioRecord.id == scenario_id,
+                    ProjectRoiScenarioRecord.project_id == project_id,
+                    ProjectRoiScenarioRecord.tenant_id == tenant_id,
+                )
+            )
+            if record is None:
+                return False
+            session.delete(record)
+            session.flush()
+            return True
 
     def create_listing(self, tenant_id: str, payload: ListingCreate) -> ListingSummary:
         with self.session_scope() as session:
@@ -517,6 +638,9 @@ class PlatformStorageService:
         if session.scalar(select(AlertPreferenceRecord.id).limit(1)) is None:
             for item in ALERTS:
                 session.add(AlertPreferenceRecord(**item))
+        if session.scalar(select(ProjectRoiScenarioRecord.id).limit(1)) is None:
+            for item in ROI_SCENARIOS:
+                session.add(ProjectRoiScenarioRecord(**item))
 
     def _to_project_summary(self, record: ProjectRecord) -> ProjectSummary:
         return ProjectSummary(
@@ -611,9 +735,78 @@ class PlatformStorageService:
             id=record.id,
             project_id=record.project_id,
             tenant_id=record.tenant_id,
+            author_id=record.author_id,
             author_name=record.author_name,
             content=record.content,
             created_at=record.created_at,
+        )
+
+    def _to_roi_scenario_summary(self, record: ProjectRoiScenarioRecord) -> RoiScenarioSummary:
+        return RoiScenarioSummary(
+            id=record.id,
+            project_id=record.project_id,
+            tenant_id=record.tenant_id,
+            listing_id=record.listing_id,
+            name=record.name,
+            scenario_type=record.scenario_type,
+            lease_assumptions=record.lease_assumptions,
+            purchase_price=record.purchase_price,
+            upfront_capex=record.upfront_capex,
+            annual_revenue=record.annual_revenue,
+            vacancy_rate=record.vacancy_rate,
+            annual_operating_expenses=record.annual_operating_expenses,
+            annual_capex_reserve=record.annual_capex_reserve,
+            initial_working_capital=record.initial_working_capital,
+            working_capital_percent_of_revenue=record.working_capital_percent_of_revenue,
+            annual_depreciation=record.annual_depreciation,
+            acquisition_fee_rate=record.acquisition_fee_rate,
+            loan_origination_fee_rate=record.loan_origination_fee_rate,
+            annual_revenue_growth_rate=record.annual_revenue_growth_rate,
+            annual_expense_growth_rate=record.annual_expense_growth_rate,
+            exit_cap_rate=record.exit_cap_rate,
+            exit_cost_rate=record.exit_cost_rate,
+            hold_period_years=record.hold_period_years,
+            discount_rate=record.discount_rate,
+            risk_free_rate=record.risk_free_rate,
+            equity_risk_premium=record.equity_risk_premium,
+            beta=record.beta,
+            debt_spread=record.debt_spread,
+            tax_rate=record.tax_rate,
+            leverage_ratio=record.leverage_ratio,
+            interest_rate=record.interest_rate,
+            interest_only_years=record.interest_only_years,
+            amortization_period_years=record.amortization_period_years,
+            net_operating_income=record.net_operating_income,
+            terminal_value=record.terminal_value,
+            total_profit=record.total_profit,
+            equity_invested=record.equity_invested,
+            debt_amount=record.debt_amount,
+            ending_loan_balance=record.ending_loan_balance,
+            sale_proceeds_after_debt=record.sale_proceeds_after_debt,
+            average_annual_cash_flow=record.average_annual_cash_flow,
+            projected_irr=record.projected_irr,
+            projected_npv=record.projected_npv,
+            cost_of_equity=record.cost_of_equity,
+            pre_tax_cost_of_debt=record.pre_tax_cost_of_debt,
+            after_tax_cost_of_debt=record.after_tax_cost_of_debt,
+            weighted_average_cost_of_capital=record.weighted_average_cost_of_capital,
+            unlevered_irr=record.unlevered_irr,
+            unlevered_npv=record.unlevered_npv,
+            total_tax_shield=record.total_tax_shield,
+            average_working_capital_balance=record.average_working_capital_balance,
+            cash_on_cash_multiple=record.cash_on_cash_multiple,
+            equity_multiple=record.equity_multiple,
+            unlevered_equity_multiple=record.unlevered_equity_multiple,
+            average_annual_fcff=record.average_annual_fcff,
+            average_annual_fcfe=record.average_annual_fcfe,
+            average_cash_on_cash_return=record.average_cash_on_cash_return,
+            first_year_cash_on_cash_return=record.first_year_cash_on_cash_return,
+            cap_rate_on_cost=record.cap_rate_on_cost,
+            average_dscr=record.average_dscr,
+            minimum_dscr=record.minimum_dscr,
+            payback_period_years=record.payback_period_years,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
         )
 
     def _to_auth_user(self, record: UserRecord) -> AuthUser:

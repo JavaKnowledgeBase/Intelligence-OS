@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -216,6 +216,88 @@ class ProjectNoteRecord(Base):
         index=True,
     )
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    author_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     author_name: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ProjectRoiScenarioRecord(Base):
+    """Saved project or listing ROI scenario assumptions with calculated outputs."""
+
+    __tablename__ = "project_roi_scenarios"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    listing_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("listings.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    scenario_type: Mapped[str] = mapped_column(String(20), nullable=False, default="custom")
+    lease_assumptions: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    purchase_price: Mapped[float] = mapped_column(Float, nullable=False)
+    upfront_capex: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    annual_revenue: Mapped[float] = mapped_column(Float, nullable=False)
+    vacancy_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    annual_operating_expenses: Mapped[float] = mapped_column(Float, nullable=False)
+    annual_capex_reserve: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    initial_working_capital: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    working_capital_percent_of_revenue: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    annual_depreciation: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    acquisition_fee_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    loan_origination_fee_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    annual_revenue_growth_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    annual_expense_growth_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    exit_cap_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    exit_cost_rate: Mapped[float] = mapped_column(Float, nullable=False, default=2)
+    hold_period_years: Mapped[int] = mapped_column(Integer, nullable=False)
+    discount_rate: Mapped[float] = mapped_column(Float, nullable=False, default=12)
+    risk_free_rate: Mapped[float] = mapped_column(Float, nullable=False, default=4.25)
+    equity_risk_premium: Mapped[float] = mapped_column(Float, nullable=False, default=5.5)
+    beta: Mapped[float] = mapped_column(Float, nullable=False, default=1.1)
+    debt_spread: Mapped[float] = mapped_column(Float, nullable=False, default=2.0)
+    tax_rate: Mapped[float] = mapped_column(Float, nullable=False, default=25.0)
+    leverage_ratio: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    interest_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    interest_only_years: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    amortization_period_years: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    net_operating_income: Mapped[float] = mapped_column(Float, nullable=False)
+    terminal_value: Mapped[float] = mapped_column(Float, nullable=False)
+    total_profit: Mapped[float] = mapped_column(Float, nullable=False)
+    equity_invested: Mapped[float] = mapped_column(Float, nullable=False)
+    debt_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ending_loan_balance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sale_proceeds_after_debt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_annual_cash_flow: Mapped[float] = mapped_column(Float, nullable=False)
+    projected_irr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    projected_npv: Mapped[float] = mapped_column(Float, nullable=False)
+    cost_of_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pre_tax_cost_of_debt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    after_tax_cost_of_debt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weighted_average_cost_of_capital: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unlevered_irr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unlevered_npv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_tax_shield: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_working_capital_balance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cash_on_cash_multiple: Mapped[float] = mapped_column(Float, nullable=False)
+    equity_multiple: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unlevered_equity_multiple: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_annual_fcff: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_annual_fcfe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_cash_on_cash_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    first_year_cash_on_cash_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cap_rate_on_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_dscr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    minimum_dscr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    payback_period_years: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

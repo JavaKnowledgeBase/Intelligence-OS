@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status
 
+from app.schemas.note import ProjectNoteSummary
 from app.schemas.auth import AuthUser
 from app.schemas.project import ProjectSummary
 
@@ -62,6 +63,22 @@ class AuthorizationService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to manage this project.",
+            )
+
+    def can_manage_project_note(self, user: AuthUser, project: ProjectSummary, note: ProjectNoteSummary) -> bool:
+        if user.tenant_id != project.tenant_id or note.tenant_id != project.tenant_id:
+            return False
+        if user.role in self.tenant_editor_roles:
+            return True
+        if user.id == project.owner_id:
+            return True
+        return user.id == note.author_id
+
+    def require_project_note_management(self, user: AuthUser, project: ProjectSummary, note: ProjectNoteSummary) -> None:
+        if not self.can_manage_project_note(user, project, note):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to modify this project note.",
             )
 
 
