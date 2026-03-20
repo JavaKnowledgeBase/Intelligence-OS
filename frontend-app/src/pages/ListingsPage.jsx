@@ -151,6 +151,10 @@ export function ListingsPage() {
     }
   }
 
+  function openLinkedProject(projectId) {
+    navigate(`/projects/${projectId}?from=allocation`);
+  }
+
   return (
     <main className="content projects-content">
       <section className="section-block">
@@ -230,6 +234,20 @@ export function ListingsPage() {
                     <span>Workspace</span>
                     <strong>{listing.project_id ? projectNameById[listing.project_id] ?? "Linked project" : "Unassigned"}</strong>
                   </div>
+                </div>
+                <div className="hero-actions" style={{ marginTop: "0.85rem" }}>
+                  {listing.project_id ? (
+                    <button type="button" className="ghost-button" onClick={() => openLinkedProject(listing.project_id)}>
+                      Open workspace
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setSearchValue(listing.location)}
+                  >
+                    Search similar
+                  </button>
                 </div>
               </article>
             ))}

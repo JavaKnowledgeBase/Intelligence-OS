@@ -3,7 +3,12 @@ from fastapi import APIRouter, Depends
 from app.api.deps import get_current_user
 from app.schemas.auth import AuthUser
 from app.schemas.market import MarketInsight, MarketInsightCreate
-from app.schemas.roi import RoiBenchmarkCalibrationResponse, RoiBenchmarkCompCreate, RoiBenchmarkCompSummary
+from app.schemas.roi import (
+    RoiBenchmarkCalibrationResponse,
+    RoiBenchmarkCompCreate,
+    RoiBenchmarkCompSummary,
+    RoiBenchmarkCompUpdate,
+)
 from app.services.platform_service import platform_service
 
 
@@ -44,10 +49,21 @@ def create_benchmark_comp(
     return platform_service.create_benchmark_comp(payload, current_user)
 
 
+@router.put("/benchmark-comps/{comp_id}", response_model=RoiBenchmarkCompSummary)
+def update_benchmark_comp(
+    comp_id: str,
+    payload: RoiBenchmarkCompUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiBenchmarkCompSummary:
+    """Update inclusion state or note for a benchmark comparable."""
+    return platform_service.update_benchmark_comp(comp_id, payload, current_user)
+
+
 @router.get("/benchmark-calibration/{asset_class}", response_model=RoiBenchmarkCalibrationResponse)
 def get_benchmark_calibration(
     asset_class: str,
+    location: str | None = None,
     current_user: AuthUser = Depends(get_current_user),
 ) -> RoiBenchmarkCalibrationResponse:
     """Return the calibrated benchmark profile for an asset class."""
-    return platform_service.get_benchmark_calibration(asset_class, current_user)
+    return platform_service.get_benchmark_calibration(asset_class, current_user, location)

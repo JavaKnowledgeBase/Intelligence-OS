@@ -218,3 +218,42 @@ export async function downloadProjectRoiRecommendationsPDF(projectId, scenarioId
 
   return response.blob();
 }
+
+export async function analyzeProjectRoiScenario(projectId, payload) {
+  const response = await authenticatedFetch(`/projects/${projectId}/roi-scenarios/analyze`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return readJsonOrThrow(response, "Unable to analyze the ROI scenario.");
+}
+
+export async function getProjectRoiVarianceAnalysis(projectId, scenarioId) {
+  const response = await authenticatedFetch(`/projects/${projectId}/roi-scenarios/${scenarioId}/variance`);
+  return readJsonOrThrow(response, "Unable to load the ROI variance analysis.");
+}
+
+export async function getProjectRoiRecommendationDrift(projectId, scenarioId) {
+  const response = await authenticatedFetch(`/projects/${projectId}/roi-scenarios/${scenarioId}/recommendation-drift`);
+  return readJsonOrThrow(response, "Unable to load the ROI recommendation drift.");
+}
+
+export async function createProjectRoiActual(projectId, scenarioId, payload) {
+  const response = await authenticatedFetch(`/projects/${projectId}/roi-scenarios/${scenarioId}/actuals`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return readJsonOrThrow(response, "Unable to save the ROI actual.");
+}
+
+export async function listProjectRoiActuals(projectId, scenarioId) {
+  const response = await authenticatedFetch(`/projects/${projectId}/roi-scenarios/${scenarioId}/actuals`);
+  return readJsonOrThrow(response, "Unable to load ROI actuals.");
+}

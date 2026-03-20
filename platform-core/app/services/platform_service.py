@@ -13,16 +13,33 @@ from app.schemas.document import ProjectDocumentSummary
 from app.schemas.listing import DealSearchResponse, ListingCreate, ListingSummary
 from app.schemas.market import MarketInsight, MarketInsightCreate
 from app.schemas.note import ProjectActivityItem, ProjectNoteCreate, ProjectNoteSummary, ProjectNoteUpdate
-from app.schemas.project import PlatformOverview, ProjectCreate, ProjectMemberAdd, ProjectSummary, ProjectWorkspace
+from app.schemas.project import (
+    PlatformOverview,
+    PortfolioSavedViewCreate,
+    PortfolioSavedViewSummary,
+    PortfolioSavedViewUpdate,
+    ProjectCreate,
+    ProjectMemberAdd,
+    ProjectSummary,
+    ProjectWorkspace,
+    RoiPortfolioOverview,
+    RoiPortfolioProjectExposure,
+    RoiPortfolioScenarioView,
+    RoiPortfolioStressView,
+)
 from app.schemas.roi import (
     RoiActualCreate,
     RoiActualSummary,
     RoiBenchmarkCalibrationResponse,
     RoiBenchmarkCompCreate,
+    RoiBenchmarkCompInfluence,
     RoiBenchmarkCompSummary,
+    RoiBenchmarkCompUpdate,
     RoiPortfolioSnapshot,
+    RoiRecommendationDriftResponse,
     RoiRecommendationSummary,
     RoiScenarioAnalysisResponse,
+    RoiScenarioBenchmarkContext,
     RoiScenarioCalculationResponse,
     RoiScenarioCreate,
     RoiScenarioInput,
@@ -53,6 +70,7 @@ class PlatformService:
         self._roi_actuals: list[RoiActualSummary] = []
         self._benchmark_comps: list[RoiBenchmarkCompSummary] = []
         self._roi_recommendations: list[RoiScenarioRecommendation] = []
+        self._portfolio_saved_views: list[PortfolioSavedViewSummary] = []
 
     def list_projects(self, user: AuthUser) -> list[ProjectSummary]:
         """Return all shared projects."""
@@ -280,8 +298,8 @@ class PlatformService:
             payload=payload,
         )
         computed = roi_analysis_service.calculate(payload)
-        benchmark_profile = self._resolve_benchmark_profile(payload.listing_id, user)
-        benchmark_ranges = self._resolve_calibrated_benchmark_ranges(benchmark_profile, user)
+        benchmark_profile, benchmark_location = self._resolve_benchmark_context(payload.listing_id, user)
+        benchmark_ranges = self._resolve_calibrated_benchmark_ranges(benchmark_profile, user, benchmark_location)
         analysis = roi_analysis_service.build_analysis(payload, computed, benchmark_profile, benchmark_ranges)
         return RoiScenarioCalculationResponse(
             scenario=scenario,
@@ -308,17 +326,22 @@ class PlatformService:
             payload=payload,
         )
         computed = roi_analysis_service.calculate(payload)
-        benchmark_profile = self._resolve_benchmark_profile(payload.listing_id, user)
-        benchmark_ranges = self._resolve_calibrated_benchmark_ranges(benchmark_profile, user)
+        benchmark_profile, benchmark_location = self._resolve_benchmark_context(payload.listing_id, user)
+        benchmark_ranges = self._resolve_calibrated_benchmark_ranges(benchmark_profile, user, benchmark_location)
         analysis = roi_analysis_service.build_analysis(payload, computed, benchmark_profile, benchmark_ranges)
+        benchmark_context = self._build_scenario_benchmark_context(benchmark_profile, user, benchmark_location)
         return RoiScenarioAnalysisResponse(
             scenario=scenario,
             analysis=analysis,
             recommendation=roi_analysis_service.build_recommendation(payload, analysis, computed),
+            benchmark_context=benchmark_context,
         )
 
     def list_benchmark_comps(self, user: AuthUser, asset_class: str | None = None) -> list[RoiBenchmarkCompSummary]:
         authorization_service.require_tenant_editor(user)
+        return self._list_benchmark_comps_for_tenant(user, asset_class)
+
+    def _list_benchmark_comps_for_tenant(self, user: AuthUser, asset_class: str | None = None) -> list[RoiBenchmarkCompSummary]:
         if platform_storage_service.is_available():
             try:
                 return platform_storage_service.list_benchmark_comps(user.tenant_id, asset_class)
@@ -334,6 +357,8 @@ class PlatformService:
         comp = RoiBenchmarkCompSummary(
             id=f"comp-{uuid4().hex[:8]}",
             tenant_id=user.tenant_id,
+            included=True,
+            override_mode="normal",
             **payload.model_dump(),
         )
         if platform_storage_service.is_available():
@@ -344,10 +369,33 @@ class PlatformService:
         self._benchmark_comps.append(comp)
         return comp
 
-    def get_benchmark_calibration(self, asset_class: str, user: AuthUser) -> RoiBenchmarkCalibrationResponse:
+    def update_benchmark_comp(self, comp_id: str, payload: RoiBenchmarkCompUpdate, user: AuthUser) -> RoiBenchmarkCompSummary:
         authorization_service.require_tenant_editor(user)
-        comps = self.list_benchmark_comps(user, asset_class)
-        _, calibration = roi_analysis_service.calibrate_benchmark_profile(asset_class, comps)
+        if platform_storage_service.is_available():
+            try:
+                updated = platform_storage_service.update_benchmark_comp(user.tenant_id, comp_id, payload)
+            except SQLAlchemyError:
+                updated = None
+            if updated is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Benchmark comp not found.")
+            return updated
+        for index, comp in enumerate(self._benchmark_comps):
+            if comp.id == comp_id and comp.tenant_id == user.tenant_id:
+                updated = comp.model_copy(
+                    update={
+                        "included": payload.included,
+                        "override_mode": payload.override_mode,
+                        "note": payload.note if payload.note is not None else comp.note,
+                    }
+                )
+                self._benchmark_comps[index] = updated
+                return updated
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Benchmark comp not found.")
+
+    def get_benchmark_calibration(self, asset_class: str, user: AuthUser, location: str | None = None) -> RoiBenchmarkCalibrationResponse:
+        authorization_service.require_tenant_editor(user)
+        comps = [comp for comp in self.list_benchmark_comps(user, asset_class) if comp.included]
+        _, calibration = roi_analysis_service.calibrate_benchmark_profile(asset_class, comps, location)
         return calibration
 
     def list_project_roi_actuals(self, project_id: str, scenario_id: str, user: AuthUser) -> list[RoiActualSummary]:
@@ -466,6 +514,150 @@ class PlatformService:
             total_noi_variance=total_noi_variance,
             average_occupancy_variance=round(mean(occupancy_variances), 2) if occupancy_variances else None,
             variance_summary=summary or ["No actual periods have been recorded yet."],
+        )
+
+    def build_project_roi_recommendation_drift(
+        self,
+        project_id: str,
+        scenario_id: str,
+        user: AuthUser,
+    ) -> RoiRecommendationDriftResponse:
+        scenario = self.get_project_roi_scenario(project_id, scenario_id, user)
+        if scenario is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI scenario not found.")
+
+        base_payload = RoiScenarioInput.model_validate(scenario.model_dump())
+        original_computed = roi_analysis_service.calculate(base_payload)
+        original_analysis = roi_analysis_service.build_analysis(base_payload, original_computed)
+        original_recommendation = roi_analysis_service.build_recommendation(
+            base_payload,
+            original_analysis,
+            original_computed,
+        )
+
+        actuals = self.list_project_roi_actuals(project_id, scenario_id, user)
+        if not actuals:
+            return RoiRecommendationDriftResponse(
+                original_recommendation=original_recommendation,
+                reforecast_recommendation=original_recommendation,
+                drift_status="stable",
+                recommended_action="maintain",
+                actual_months_recorded=0,
+                confidence="low",
+                summary=["No actual operating periods have been recorded yet, so the original recommendation still stands."],
+                reforecast_scenario=scenario,
+            )
+
+        actuals = sorted(actuals, key=lambda item: item.period_start)
+        computed = roi_analysis_service.calculate(base_payload)
+        expectations = computed.monthly_cash_flows[: len(actuals)]
+        weight = min(len(actuals), 12) / 12
+
+        avg_actual_revenue = mean(item.effective_revenue for item in actuals)
+        avg_actual_operating_expenses = mean(item.operating_expenses for item in actuals)
+        avg_actual_capex = mean(item.capex for item in actuals)
+        occupancy_points = [item.occupancy_rate for item in actuals if item.occupancy_rate is not None]
+        avg_actual_occupancy = mean(occupancy_points) if occupancy_points else None
+
+        avg_expected_revenue = mean(item.effective_revenue for item in expectations) if expectations else scenario.annual_revenue / 12
+        avg_expected_operating_expenses = (
+            mean(item.operating_expenses for item in expectations) if expectations else scenario.annual_operating_expenses / 12
+        )
+        avg_expected_capex = mean(item.capex_reserve for item in expectations) if expectations else scenario.annual_capex_reserve / 12
+
+        realized_annual_revenue = avg_actual_revenue * 12
+        realized_annual_operating_expenses = avg_actual_operating_expenses * 12
+        realized_annual_capex = avg_actual_capex * 12
+
+        blended_revenue = scenario.annual_revenue * (1 - weight) + realized_annual_revenue * weight
+        blended_operating_expenses = scenario.annual_operating_expenses * (1 - weight) + realized_annual_operating_expenses * weight
+        blended_capex = scenario.annual_capex_reserve * (1 - weight) + realized_annual_capex * weight
+
+        blended_vacancy_rate = scenario.vacancy_rate
+        if avg_actual_occupancy is not None:
+            blended_vacancy_rate = min(max(scenario.vacancy_rate * (1 - weight) + max(0.0, 100 - avg_actual_occupancy) * weight, 0.0), 100.0)
+
+        remaining_hold_period = max(scenario.hold_period_years - (len(actuals) // 12), 1)
+        reforecast_payload = base_payload.model_copy(
+            update={
+                "name": f"{scenario.name} reforecast",
+                "annual_revenue": round(blended_revenue, 2),
+                "annual_operating_expenses": round(blended_operating_expenses, 2),
+                "annual_capex_reserve": round(blended_capex, 2),
+                "vacancy_rate": round(blended_vacancy_rate, 2),
+                "hold_period_years": remaining_hold_period,
+            }
+        )
+
+        reforecast_computed = roi_analysis_service.calculate(reforecast_payload)
+        reforecast_analysis = roi_analysis_service.build_analysis(reforecast_payload, reforecast_computed)
+        reforecast_recommendation = roi_analysis_service.build_recommendation(
+            reforecast_payload,
+            reforecast_analysis,
+            reforecast_computed,
+        )
+        reforecast_scenario = roi_analysis_service.to_summary(
+            scenario_id=f"{scenario.id}-reforecast",
+            project_id=project_id,
+            tenant_id=user.tenant_id,
+            payload=reforecast_payload,
+        )
+
+        decision_rank = {"reject": 0, "watch": 1, "invest": 2}
+        original_rank = decision_rank[original_recommendation.recommendation]
+        reforecast_rank = decision_rank[reforecast_recommendation.recommendation]
+        if reforecast_rank > original_rank:
+            drift_status = "improving"
+            recommended_action = "upgrade"
+        elif reforecast_rank < original_rank:
+            drift_status = "deteriorating"
+            recommended_action = "downgrade"
+        else:
+            drift_status = "stable"
+            recommended_action = "maintain"
+
+        confidence = "low"
+        if len(actuals) >= 6:
+            confidence = "medium"
+        if len(actuals) >= 12:
+            confidence = "high"
+
+        summary: list[str] = []
+        revenue_delta = avg_actual_revenue - avg_expected_revenue
+        expense_delta = avg_actual_operating_expenses - avg_expected_operating_expenses
+        capex_delta = avg_actual_capex - avg_expected_capex
+        if revenue_delta < 0:
+            summary.append("Trailing realized revenue is below the original underwriting run-rate.")
+        elif revenue_delta > 0:
+            summary.append("Trailing realized revenue is ahead of the original underwriting run-rate.")
+        if expense_delta > 0:
+            summary.append("Trailing operating expenses are higher than planned.")
+        elif expense_delta < 0:
+            summary.append("Trailing operating expenses are running below plan.")
+        if capex_delta > 0:
+            summary.append("Recorded capex is tracking above the reserved underwriting path.")
+        if avg_actual_occupancy is not None:
+            expected_occupancy = 100 - scenario.vacancy_rate
+            if avg_actual_occupancy < expected_occupancy:
+                summary.append("Observed occupancy is below the original stabilization assumption.")
+            elif avg_actual_occupancy > expected_occupancy:
+                summary.append("Observed occupancy is outperforming the original plan.")
+        if recommended_action == "downgrade":
+            summary.append("The actuals-adjusted reforecast indicates the scenario should be downgraded.")
+        elif recommended_action == "upgrade":
+            summary.append("The actuals-adjusted reforecast supports an improved recommendation if execution remains durable.")
+        else:
+            summary.append("The actuals-adjusted reforecast does not change the current recommendation.")
+
+        return RoiRecommendationDriftResponse(
+            original_recommendation=original_recommendation,
+            reforecast_recommendation=reforecast_recommendation,
+            drift_status=drift_status,
+            recommended_action=recommended_action,
+            actual_months_recorded=len(actuals),
+            confidence=confidence,
+            summary=summary[:5],
+            reforecast_scenario=reforecast_scenario,
         )
 
     def build_project_roi_sensitivity(
@@ -808,6 +1000,82 @@ class PlatformService:
         """Return the active notification preferences."""
         return self._load_alerts(user)
 
+    def list_portfolio_saved_views(self, user: AuthUser) -> list[PortfolioSavedViewSummary]:
+        authorization_service.require_project_creation(user)
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.list_portfolio_saved_views(user.tenant_id, user.id)
+            except SQLAlchemyError:
+                pass
+        return [
+            item
+            for item in self._portfolio_saved_views
+            if item.tenant_id == user.tenant_id and (item.is_shared or item.created_by == user.id)
+        ]
+
+    def create_portfolio_saved_view(self, payload: PortfolioSavedViewCreate, user: AuthUser) -> PortfolioSavedViewSummary:
+        authorization_service.require_project_creation(user)
+        if platform_storage_service.is_available():
+            try:
+                return platform_storage_service.create_portfolio_saved_view(
+                    user.tenant_id,
+                    user.id,
+                    user.full_name,
+                    payload,
+                )
+            except SQLAlchemyError:
+                pass
+        view = PortfolioSavedViewSummary(
+            id=f"portfolio-view-{uuid4().hex[:8]}",
+            tenant_id=user.tenant_id,
+            created_by=user.id,
+            created_by_name=user.full_name,
+            name=payload.name,
+            portfolio_view=payload.portfolio_view,
+            is_shared=payload.is_shared,
+            created_at=datetime.now(UTC),
+        )
+        self._portfolio_saved_views.append(view)
+        return view
+
+    def delete_portfolio_saved_view(self, view_id: str, user: AuthUser) -> None:
+        authorization_service.require_project_creation(user)
+        if platform_storage_service.is_available():
+            try:
+                deleted = platform_storage_service.delete_portfolio_saved_view(user.tenant_id, user.id, view_id)
+            except SQLAlchemyError:
+                deleted = False
+            if deleted:
+                return
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio saved view not found.")
+        for index, item in enumerate(self._portfolio_saved_views):
+            if item.id == view_id and item.tenant_id == user.tenant_id and item.created_by == user.id:
+                self._portfolio_saved_views.pop(index)
+                return
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio saved view not found.")
+
+    def update_portfolio_saved_view(
+        self,
+        view_id: str,
+        payload: PortfolioSavedViewUpdate,
+        user: AuthUser,
+    ) -> PortfolioSavedViewSummary:
+        authorization_service.require_project_creation(user)
+        if platform_storage_service.is_available():
+            try:
+                updated = platform_storage_service.update_portfolio_saved_view(user.tenant_id, user.id, view_id, payload)
+            except SQLAlchemyError:
+                updated = None
+            if updated is not None:
+                return updated
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio saved view not found.")
+        for index, item in enumerate(self._portfolio_saved_views):
+            if item.id == view_id and item.tenant_id == user.tenant_id and item.created_by == user.id:
+                updated = item.model_copy(update=payload.model_dump())
+                self._portfolio_saved_views[index] = updated
+                return updated
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio saved view not found.")
+
     def create_alert(self, payload: AlertPreferenceCreate, user: AuthUser) -> AlertPreference:
         """Create a tenant-scoped alert rule."""
         authorization_service.require_tenant_editor(user)
@@ -873,7 +1141,135 @@ class PlatformService:
             average_deal_score=round(mean(item.deal_score for item in visible_listings), 1) if visible_listings else 0,
             featured_deals=sorted(visible_listings, key=lambda item: item.deal_score, reverse=True)[:3],
             market_insights=self.get_market_insights(user),
+            roi_portfolio=self.get_roi_portfolio_overview(user),
         )
+
+    def get_roi_portfolio_overview(self, user: AuthUser) -> RoiPortfolioOverview:
+        projects = self.list_projects(user)
+        total_budget = sum(project.budget_amount or 0 for project in projects)
+        top_scenarios: list[RoiPortfolioScenarioView] = []
+        capital_allocation: list[RoiPortfolioProjectExposure] = []
+        downside_stress_views: list[RoiPortfolioStressView] = []
+        risk_scores: list[float] = []
+        invest_count = 0
+        watch_count = 0
+        reject_count = 0
+        downside_exposure_count = 0
+        total_roi_scenarios = 0
+        total_roi_projects = 0
+
+        for project in projects:
+            scenarios = self.list_project_roi_scenarios(project.id, user)
+            if scenarios:
+                total_roi_projects += 1
+            snapshot = self.get_project_roi_snapshot(project.id, user)
+            total_roi_scenarios += len(snapshot.scenario_rankings)
+            for ranking in snapshot.scenario_rankings:
+                top_scenarios.append(
+                    RoiPortfolioScenarioView(
+                        project_id=project.id,
+                        project_name=project.name,
+                        project_type=project.project_type,
+                        budget_amount=project.budget_amount,
+                        ranking=ranking,
+                    )
+                )
+                risk_scores.append(ranking.risk_adjusted_score)
+                if ranking.recommendation == "invest":
+                    invest_count += 1
+                elif ranking.recommendation == "watch":
+                    watch_count += 1
+                elif ranking.recommendation == "reject":
+                    reject_count += 1
+                if (ranking.probability_negative_npv or 0) >= 35 or (ranking.probability_dscr_below_one or 0) >= 20:
+                    downside_exposure_count += 1
+
+            downside_stress_views.extend(self._build_project_downside_stress_views(project, scenarios))
+
+            capital_allocation.append(
+                RoiPortfolioProjectExposure(
+                    project_id=project.id,
+                    project_name=project.name,
+                    project_type=project.project_type,
+                    budget_amount=project.budget_amount,
+                    budget_weight_percent=round(((project.budget_amount or 0) / total_budget) * 100, 2) if total_budget > 0 and project.budget_amount is not None else None,
+                    scenario_count=len(scenarios),
+                    best_risk_adjusted_score=snapshot.best_risk_adjusted_score,
+                )
+            )
+
+        return RoiPortfolioOverview(
+            total_roi_projects=total_roi_projects,
+            total_roi_scenarios=total_roi_scenarios,
+            average_risk_adjusted_score=round(mean(risk_scores), 2) if risk_scores else None,
+            invest_count=invest_count,
+            watch_count=watch_count,
+            reject_count=reject_count,
+            downside_exposure_count=downside_exposure_count,
+            top_scenarios=sorted(top_scenarios, key=lambda item: item.ranking.risk_adjusted_score, reverse=True)[:5],
+            capital_allocation=sorted(
+                capital_allocation,
+                key=lambda item: (item.budget_amount or 0, item.best_risk_adjusted_score or 0),
+                reverse=True,
+            )[:5],
+            downside_stress_views=sorted(
+                downside_stress_views,
+                key=lambda item: (
+                    item.npv_drawdown if item.npv_drawdown is not None else float("-inf"),
+                    -9999 if item.stressed_irr is None else -item.stressed_irr,
+                ),
+            )[:5],
+        )
+
+    def _build_project_downside_stress_views(
+        self,
+        project: ProjectSummary,
+        scenarios: list[RoiScenarioSummary],
+    ) -> list[RoiPortfolioStressView]:
+        stress_rows: list[RoiPortfolioStressView] = []
+        for scenario in scenarios:
+            payload = RoiScenarioInput.model_validate(scenario.model_dump())
+            stress_tests = roi_analysis_service.build_analysis(payload).stress_tests
+            downside_case = next((item for item in stress_tests if item.scenario_key == "combined_downside"), None)
+            if downside_case is None:
+                continue
+            irr_compression = None
+            if scenario.projected_irr is not None and downside_case.projected_irr is not None:
+                irr_compression = round(scenario.projected_irr - downside_case.projected_irr, 2)
+            npv_drawdown = None
+            if downside_case.projected_npv is not None:
+                npv_drawdown = round(scenario.projected_npv - downside_case.projected_npv, 2)
+            stress_rows.append(
+                RoiPortfolioStressView(
+                    project_id=project.id,
+                    project_name=project.name,
+                    project_type=project.project_type,
+                    scenario_id=scenario.id,
+                    scenario_name=scenario.name,
+                    scenario_type=scenario.scenario_type,
+                    stressed_irr=downside_case.projected_irr,
+                    stressed_npv=downside_case.projected_npv,
+                    base_irr=scenario.projected_irr,
+                    base_npv=scenario.projected_npv,
+                    irr_compression=irr_compression,
+                    npv_drawdown=npv_drawdown,
+                    minimum_dscr=downside_case.minimum_dscr,
+                    fragility=self._classify_downside_fragility(downside_case.projected_irr, downside_case.projected_npv, downside_case.minimum_dscr),
+                )
+            )
+        return stress_rows
+
+    def _classify_downside_fragility(
+        self,
+        stressed_irr: float | None,
+        stressed_npv: float | None,
+        minimum_dscr: float | None,
+    ) -> str:
+        if (stressed_irr is not None and stressed_irr < 0) or (stressed_npv is not None and stressed_npv < 0) or (minimum_dscr is not None and minimum_dscr < 1.0):
+            return "high"
+        if (stressed_irr is not None and stressed_irr < 8.0) or (minimum_dscr is not None and minimum_dscr < 1.2):
+            return "medium"
+        return "low"
 
     def _load_projects(self) -> list[ProjectSummary]:
         if platform_storage_service.is_available():
@@ -977,24 +1373,168 @@ class PlatformService:
     def get_project_roi_scenario(self, project_id: str, scenario_id: str, user: AuthUser) -> RoiScenarioSummary | None:
         return next((item for item in self.list_project_roi_scenarios(project_id, user) if item.id == scenario_id), None)
 
-    def _resolve_benchmark_profile(self, listing_id: str | None, user: AuthUser) -> str:
+    def _resolve_benchmark_context(self, listing_id: str | None, user: AuthUser) -> tuple[str, str | None]:
         if listing_id is None:
-            return "general"
+            return "general", None
         listing = next((item for item in self.list_listings(user) if item.id == listing_id), None)
         if listing is None:
-            return "general"
-        return listing.asset_class
+            return "general", None
+        return listing.asset_class, listing.location
 
     def _resolve_calibrated_benchmark_ranges(
         self,
         benchmark_profile: str,
         user: AuthUser,
+        location: str | None = None,
     ) -> dict[str, tuple[float, float]] | None:
-        comps = self.list_benchmark_comps(user, benchmark_profile)
+        comps = [comp for comp in self._list_benchmark_comps_for_tenant(user, benchmark_profile) if comp.included]
         if not comps:
             return None
-        ranges, _ = roi_analysis_service.calibrate_benchmark_profile(benchmark_profile, comps)
+        ranges, _ = roi_analysis_service.calibrate_benchmark_profile(benchmark_profile, comps, location)
         return ranges
+
+    def _build_scenario_benchmark_context(
+        self,
+        benchmark_profile: str,
+        user: AuthUser,
+        location: str | None = None,
+    ) -> RoiScenarioBenchmarkContext:
+        all_comps = self._list_benchmark_comps_for_tenant(user, benchmark_profile)
+        included_comps = [comp for comp in all_comps if comp.included]
+        if not included_comps:
+            return RoiScenarioBenchmarkContext(
+                benchmark_profile=benchmark_profile,
+                location=location,
+                source_mode="default_profile",
+                comp_count=0,
+                effective_comp_count=0,
+                matched_location=location,
+                notes=["No active comparable records are available for this scenario yet."],
+                comps=[],
+            )
+
+        _ranges, calibration = roi_analysis_service.calibrate_benchmark_profile(benchmark_profile, included_comps, location)
+        contributing_metrics_by_comp = self._map_benchmark_comp_contributions(included_comps, location)
+        effective_comp_ids = {comp_id for comp_id, metrics in contributing_metrics_by_comp.items() if metrics}
+        comp_cards: list[RoiBenchmarkCompInfluence] = []
+        for comp in sorted(
+            all_comps,
+            key=lambda item: (
+                0 if item.id in effective_comp_ids else 1,
+                0 if item.included else 1,
+                item.source_name.lower(),
+            ),
+        ):
+            weight = round(roi_analysis_service._benchmark_comp_weight(comp, location), 2) if comp.included else None
+            contributing_metrics = sorted(contributing_metrics_by_comp.get(comp.id, set()))
+            comp_cards.append(
+                RoiBenchmarkCompInfluence(
+                    comp_id=comp.id,
+                    source_name=comp.source_name,
+                    location=comp.location,
+                    closed_on=comp.closed_on,
+                    included=comp.included,
+                    override_mode=comp.override_mode,
+                    fit_label=self._benchmark_comp_fit_label(comp, location),
+                    freshness_label=self._benchmark_comp_freshness_label(comp),
+                    influence=self._benchmark_comp_influence_label(comp, contributing_metrics, weight),
+                    weight=weight,
+                    contributing_metrics=contributing_metrics,
+                    note=comp.note,
+                )
+            )
+
+        return RoiScenarioBenchmarkContext(
+            benchmark_profile=calibration.benchmark_profile,
+            location=location,
+            source_mode=calibration.source_mode,
+            comp_count=calibration.comp_count,
+            effective_comp_count=len(effective_comp_ids) or calibration.effective_comp_count,
+            matched_location=calibration.matched_location,
+            notes=calibration.notes,
+            comps=comp_cards,
+        )
+
+    def _map_benchmark_comp_contributions(
+        self,
+        comps: list[RoiBenchmarkCompSummary],
+        location: str | None,
+    ) -> dict[str, set[str]]:
+        eligible_items = [
+            {
+                "comp": comp,
+                "weight": roi_analysis_service._benchmark_comp_weight(comp, location),
+            }
+            for comp in comps
+            if comp.override_mode != "exclude_outlier"
+        ]
+        eligible_items = [item for item in eligible_items if item["weight"] > 0]
+        contributions: dict[str, set[str]] = {comp.id: set() for comp in comps}
+        metric_sources = {
+            "projected_irr": [(item["comp"].projected_irr, item["weight"]) for item in eligible_items if item["comp"].projected_irr is not None],
+            "equity_multiple": [(item["comp"].equity_multiple, item["weight"]) for item in eligible_items if item["comp"].equity_multiple is not None],
+            "average_dscr": [(item["comp"].average_dscr, item["weight"]) for item in eligible_items if item["comp"].average_dscr is not None],
+            "leverage_ratio": [(item["comp"].leverage_ratio, item["weight"]) for item in eligible_items if item["comp"].leverage_ratio is not None],
+            "vacancy_rate": [(100 - item["comp"].occupancy_rate, item["weight"]) for item in eligible_items if item["comp"].occupancy_rate is not None],
+        }
+
+        for metric, weighted_values in metric_sources.items():
+            if not weighted_values:
+                continue
+            filtered_values, _excluded = roi_analysis_service._exclude_outliers(metric, weighted_values, eligible_items)
+            if not filtered_values:
+                filtered_values = weighted_values
+            for item in eligible_items:
+                comp = item["comp"]
+                metric_value = 100 - comp.occupancy_rate if metric == "vacancy_rate" and comp.occupancy_rate is not None else getattr(comp, metric)
+                if metric_value is None:
+                    continue
+                if (metric_value, item["weight"]) in filtered_values:
+                    contributions.setdefault(comp.id, set()).add(metric)
+        return contributions
+
+    def _benchmark_comp_fit_label(self, comp: RoiBenchmarkCompSummary, location: str | None) -> str:
+        if not location:
+            return "General benchmark fit"
+        comp_location = roi_analysis_service._normalize_location(comp.location)
+        target_location = roi_analysis_service._normalize_location(location)
+        if comp_location == target_location:
+            return "Exact market match"
+        comp_state = roi_analysis_service._extract_state(comp.location)
+        target_state = roi_analysis_service._extract_state(location)
+        if comp_state and target_state and comp_state == target_state:
+            return "Same-state match"
+        return "Out-of-market reference"
+
+    def _benchmark_comp_freshness_label(self, comp: RoiBenchmarkCompSummary) -> str:
+        age_weight = roi_analysis_service._benchmark_comp_age_weight(comp)
+        if comp.closed_on is None:
+            return "Undated comp"
+        if age_weight >= 1.0:
+            return "Fresh comp"
+        if age_weight >= 0.8:
+            return "Aging comp"
+        if age_weight >= 0.6:
+            return "Stale comp"
+        return "Very stale comp"
+
+    def _benchmark_comp_influence_label(
+        self,
+        comp: RoiBenchmarkCompSummary,
+        contributing_metrics: list[str],
+        weight: float | None,
+    ) -> str:
+        if not comp.included:
+            return "excluded_by_analyst"
+        if comp.override_mode == "exclude_outlier":
+            return "excluded_outlier"
+        if comp.override_mode == "force_include" and contributing_metrics:
+            return "forced"
+        if contributing_metrics and weight is not None and weight < 1.0:
+            return "downweighted"
+        if contributing_metrics:
+            return "used"
+        return "not_used"
 
 
 # Shared singleton for the API layer until dependency injection is introduced.

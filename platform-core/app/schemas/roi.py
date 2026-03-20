@@ -293,11 +293,21 @@ class RoiBenchmarkCompCreate(BaseModel):
     note: str = Field(default="", max_length=400)
 
 
+class RoiBenchmarkCompUpdate(BaseModel):
+    """Analyst curation update for a saved comparable."""
+
+    included: bool
+    override_mode: Literal["normal", "force_include", "exclude_outlier"] = "normal"
+    note: str | None = Field(default=None, max_length=400)
+
+
 class RoiBenchmarkCompSummary(RoiBenchmarkCompCreate):
     """Saved benchmark comparable used by calibration and benchmarking."""
 
     id: str
     tenant_id: str
+    included: bool = True
+    override_mode: Literal["normal", "force_include", "exclude_outlier"] = "normal"
     created_at: datetime | None = None
 
 
@@ -306,9 +316,43 @@ class RoiBenchmarkCalibrationResponse(BaseModel):
 
     benchmark_profile: str
     comp_count: int
+    effective_comp_count: int
+    matched_location: str | None = None
+    stale_comp_count: int = 0
+    excluded_outlier_count: int = 0
     source_mode: Literal["external_comps", "default_profile"]
     metrics: list[RoiBenchmarkMetricComparison]
     notes: list[str]
+
+
+class RoiBenchmarkCompInfluence(BaseModel):
+    """Comparable-level context explaining which records shaped a scenario benchmark view."""
+
+    comp_id: str
+    source_name: str
+    location: str
+    closed_on: date | None = None
+    included: bool
+    override_mode: Literal["normal", "force_include", "exclude_outlier"] = "normal"
+    fit_label: str
+    freshness_label: str
+    influence: Literal["used", "downweighted", "forced", "excluded_outlier", "excluded_by_analyst", "not_used"]
+    weight: float | None = None
+    contributing_metrics: list[str] = Field(default_factory=list)
+    note: str = ""
+
+
+class RoiScenarioBenchmarkContext(BaseModel):
+    """Scenario-specific comp context used to explain benchmark calibration inputs."""
+
+    benchmark_profile: str
+    location: str | None = None
+    source_mode: Literal["external_comps", "default_profile"]
+    comp_count: int
+    effective_comp_count: int
+    matched_location: str | None = None
+    notes: list[str]
+    comps: list[RoiBenchmarkCompInfluence] = Field(default_factory=list)
 
 
 class RoiMonteCarloSummary(BaseModel):
@@ -437,6 +481,19 @@ class RoiVarianceAnalysis(BaseModel):
     variance_summary: list[str]
 
 
+class RoiRecommendationDriftResponse(BaseModel):
+    """Actuals-adjusted recommendation comparison against the original plan."""
+
+    original_recommendation: RoiRecommendationSummary
+    reforecast_recommendation: RoiRecommendationSummary
+    drift_status: Literal["stable", "improving", "deteriorating"]
+    recommended_action: Literal["maintain", "upgrade", "downgrade"]
+    actual_months_recorded: int
+    confidence: Literal["low", "medium", "high"]
+    summary: list[str]
+    reforecast_scenario: RoiScenarioSummary
+
+
 class RoiScenarioCalculationResponse(BaseModel):
     """Ephemeral calculation preview for ROI inputs."""
 
@@ -453,6 +510,7 @@ class RoiScenarioAnalysisResponse(BaseModel):
     scenario: RoiScenarioSummary
     analysis: RoiScenarioAnalysis
     recommendation: RoiRecommendationSummary
+    benchmark_context: RoiScenarioBenchmarkContext | None = None
 
 
 class RoiPortfolioSnapshot(BaseModel):

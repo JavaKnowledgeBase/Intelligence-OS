@@ -65,3 +65,37 @@ export async function triggerIngestionSync(sourceName = "starter_feed") {
   });
   return readJsonOrThrow(response, "Unable to trigger the ingestion sync.");
 }
+
+export async function fetchBenchmarkComps(assetClass) {
+  const query = assetClass ? `?asset_class=${encodeURIComponent(assetClass)}` : "";
+  const response = await authenticatedFetch(`/market/benchmark-comps${query}`);
+  return readJsonOrThrow(response, "Unable to load benchmark comps.");
+}
+
+export async function createBenchmarkComp(payload) {
+  const response = await authenticatedFetch("/market/benchmark-comps", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  return readJsonOrThrow(response, "Unable to create the benchmark comp.");
+}
+
+export async function updateBenchmarkComp(compId, payload) {
+  const response = await authenticatedFetch(`/market/benchmark-comps/${compId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  return readJsonOrThrow(response, "Unable to update the benchmark comp.");
+}
+
+export async function fetchBenchmarkCalibration(assetClass, location) {
+  const query = location?.trim() ? `?location=${encodeURIComponent(location.trim())}` : "";
+  const response = await authenticatedFetch(`/market/benchmark-calibration/${encodeURIComponent(assetClass)}${query}`);
+  return readJsonOrThrow(response, "Unable to load the benchmark calibration.");
+}

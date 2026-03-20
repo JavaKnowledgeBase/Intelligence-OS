@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
+
 from dataclasses import dataclass
 from hashlib import md5
 from math import isfinite
@@ -788,6 +790,7 @@ class RoiAnalysisService:
         self,
         asset_class: str,
         comps: list[RoiBenchmarkCompSummary],
+        location: str | None = None,
     ) -> tuple[dict[str, tuple[float, float]], RoiBenchmarkCalibrationResponse]:
         profile_name = asset_class if asset_class in self.BENCHMARK_PROFILES else "general"
         if not comps:
@@ -795,6 +798,10 @@ class RoiAnalysisService:
             return default_profile, RoiBenchmarkCalibrationResponse(
                 benchmark_profile=profile_name,
                 comp_count=0,
+                effective_comp_count=0,
+                matched_location=location,
+                stale_comp_count=0,
+                excluded_outlier_count=0,
                 source_mode="default_profile",
                 metrics=[
                     RoiBenchmarkMetricComparison(
@@ -812,18 +819,44 @@ class RoiAnalysisService:
 
         calibrated: dict[str, tuple[float, float]] = {}
         metrics: list[RoiBenchmarkMetricComparison] = []
+        weighted_comps = [
+            {
+                "comp": comp,
+                "weight": self._benchmark_comp_weight(comp, location),
+            }
+            for comp in comps
+        ]
+        weighted_comps = [item for item in weighted_comps if item["comp"].override_mode != "exclude_outlier"]
+        weighted_comps = [item for item in weighted_comps if item["weight"] > 0]
+        stale_comp_count = sum(1 for item in weighted_comps if self._benchmark_comp_age_weight(item["comp"]) < 1.0)
+        excluded_outlier_count = 0
         metric_sources = {
-            "projected_irr": [comp.projected_irr for comp in comps if comp.projected_irr is not None],
-            "equity_multiple": [comp.equity_multiple for comp in comps if comp.equity_multiple is not None],
-            "average_dscr": [comp.average_dscr for comp in comps if comp.average_dscr is not None],
-            "leverage_ratio": [comp.leverage_ratio for comp in comps if comp.leverage_ratio is not None],
-            "vacancy_rate": [100 - comp.occupancy_rate for comp in comps if comp.occupancy_rate is not None],
+            "projected_irr": [(item["comp"].projected_irr, item["weight"]) for item in weighted_comps if item["comp"].projected_irr is not None],
+            "equity_multiple": [(item["comp"].equity_multiple, item["weight"]) for item in weighted_comps if item["comp"].equity_multiple is not None],
+            "average_dscr": [(item["comp"].average_dscr, item["weight"]) for item in weighted_comps if item["comp"].average_dscr is not None],
+            "leverage_ratio": [(item["comp"].leverage_ratio, item["weight"]) for item in weighted_comps if item["comp"].leverage_ratio is not None],
+            "vacancy_rate": [(100 - item["comp"].occupancy_rate, item["weight"]) for item in weighted_comps if item["comp"].occupancy_rate is not None],
         }
-        for metric, values in metric_sources.items():
-            if values:
-                min_value = round(self._percentile(values, 25) or min(values), 2)
-                max_value = round(self._percentile(values, 75) or max(values), 2)
+        effective_comp_keys: set[str] = set()
+        for metric, weighted_values in metric_sources.items():
+            if weighted_values:
+                filtered_values, excluded = self._exclude_outliers(metric, weighted_values, weighted_comps)
+                excluded_outlier_count += excluded
+                numeric_values = [value for value, _weight in filtered_values]
+                if not numeric_values:
+                    continue
+                min_value = round(self._weighted_percentile(filtered_values, 25) or min(numeric_values), 2)
+                max_value = round(self._weighted_percentile(filtered_values, 75) or max(numeric_values), 2)
                 calibrated[metric] = (min_value, max_value)
+                for value, _weight in filtered_values:
+                    for item in weighted_comps:
+                        comp = item["comp"]
+                        if metric == "vacancy_rate":
+                            metric_value = 100 - comp.occupancy_rate if comp.occupancy_rate is not None else None
+                        else:
+                            metric_value = getattr(comp, metric)
+                        if metric_value == value:
+                            effective_comp_keys.add(comp.id)
                 metrics.append(
                     RoiBenchmarkMetricComparison(
                         metric=metric,
@@ -849,10 +882,117 @@ class RoiAnalysisService:
         return calibrated, RoiBenchmarkCalibrationResponse(
             benchmark_profile=profile_name,
             comp_count=len(comps),
+            effective_comp_count=len(effective_comp_keys) or len(weighted_comps),
+            matched_location=location,
+            stale_comp_count=stale_comp_count,
+            excluded_outlier_count=excluded_outlier_count,
             source_mode="external_comps",
             metrics=metrics,
-            notes=["Benchmark calibration derived from tenant-provided comparable records."],
+            notes=self._build_calibration_notes(location, len(comps), len(effective_comp_keys) or len(weighted_comps), stale_comp_count, excluded_outlier_count),
         )
+
+    def _build_calibration_notes(
+        self,
+        location: str | None,
+        comp_count: int,
+        effective_comp_count: int,
+        stale_comp_count: int,
+        excluded_outlier_count: int,
+    ) -> list[str]:
+        notes = ["Benchmark calibration derived from tenant-provided comparable records."]
+        if location:
+            notes.append(f"Calibration favored records closest to {location}.")
+        if stale_comp_count:
+            notes.append(f"{stale_comp_count} older comparable records were down-weighted for staleness.")
+        if excluded_outlier_count:
+            notes.append(f"{excluded_outlier_count} outlier metric observations were excluded from range construction.")
+        if effective_comp_count < comp_count:
+            notes.append("Only the most relevant comparable observations contributed to the final calibration range.")
+        return notes
+
+    def _normalize_location(self, value: str | None) -> str:
+        return (value or "").strip().lower()
+
+    def _extract_state(self, value: str | None) -> str | None:
+        normalized = self._normalize_location(value)
+        if "," in normalized:
+            return normalized.split(",")[-1].strip()
+        return None
+
+    def _benchmark_comp_age_weight(self, comp: RoiBenchmarkCompSummary) -> float:
+        if comp.closed_on is None:
+            return 0.6
+        today = datetime.now(UTC).date()
+        age_days = max((today - comp.closed_on).days, 0)
+        if age_days <= 365:
+            return 1.0
+        if age_days <= 730:
+            return 0.8
+        if age_days <= 1095:
+            return 0.6
+        return 0.35
+
+    def _benchmark_comp_weight(self, comp: RoiBenchmarkCompSummary, location: str | None) -> float:
+        age_weight = self._benchmark_comp_age_weight(comp)
+        if not location:
+            return age_weight
+        target_location = self._normalize_location(location)
+        comp_location = self._normalize_location(comp.location)
+        if comp_location == target_location:
+            return age_weight * 1.0
+        if self._extract_state(comp.location) and self._extract_state(comp.location) == self._extract_state(location):
+            return age_weight * 0.75
+        return age_weight * 0.45
+
+    def _exclude_outliers(
+        self,
+        metric: str,
+        weighted_values: list[tuple[float, float]],
+        weighted_comps: list[dict[str, object]],
+    ) -> tuple[list[tuple[float, float]], int]:
+        values = [value for value, _weight in weighted_values]
+        if len(values) < 4:
+            return weighted_values, 0
+        q1 = self._percentile(values, 25)
+        q3 = self._percentile(values, 75)
+        if q1 is None or q3 is None:
+            return weighted_values, 0
+        iqr = q3 - q1
+        if iqr <= 0:
+            return weighted_values, 0
+        lower = q1 - (1.5 * iqr)
+        upper = q3 + (1.5 * iqr)
+        forced_values: list[tuple[float, float]] = []
+        for item in weighted_comps:
+            comp = item["comp"]
+            if getattr(comp, "override_mode", "normal") != "force_include":
+                continue
+            if metric == "vacancy_rate":
+                metric_value = 100 - comp.occupancy_rate if comp.occupancy_rate is not None else None
+            else:
+                metric_value = getattr(comp, metric)
+            if metric_value is not None:
+                forced_values.append((metric_value, item["weight"]))
+        filtered = [(value, weight) for value, weight in weighted_values if lower <= value <= upper]
+        for forced in forced_values:
+            if forced not in filtered:
+                filtered.append(forced)
+        return (filtered or weighted_values), max(len(weighted_values) - len(filtered), 0)
+
+    def _weighted_percentile(self, weighted_values: list[tuple[float, float]], percentile: float) -> float | None:
+        if not weighted_values:
+            return None
+        ordered = sorted(weighted_values, key=lambda item: item[0])
+        total_weight = sum(weight for _value, weight in ordered)
+        if total_weight <= 0:
+            return None
+        threshold = total_weight * (percentile / 100)
+        cumulative = 0.0
+        for value, weight in ordered:
+            cumulative += weight
+            if cumulative >= threshold:
+                return value
+        return ordered[-1][0]
 
     def _benchmark_metric(self, metric: str, actual: float | None, benchmark_min: float, benchmark_max: float) -> RoiBenchmarkMetricComparison:
         label = metric.replace("_", " ")

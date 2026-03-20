@@ -10,6 +10,9 @@ from app.schemas.document import ProjectDocumentPreview, ProjectDocumentSummary,
 from app.schemas.note import ProjectNoteCreate, ProjectNoteSummary, ProjectNoteUpdate
 from app.schemas.project import (
     PlatformOverview,
+    PortfolioSavedViewCreate,
+    PortfolioSavedViewSummary,
+    PortfolioSavedViewUpdate,
     ProjectCreate,
     ProjectMemberAdd,
     ProjectSummary,
@@ -19,6 +22,7 @@ from app.schemas.roi import (
     RoiActualCreate,
     RoiActualSummary,
     RoiPortfolioSnapshot,
+    RoiRecommendationDriftResponse,
     RoiScenarioAnalysisResponse,
     RoiScenarioCalculationResponse,
     RoiScenarioCreate,
@@ -46,6 +50,41 @@ def list_projects(current_user: AuthUser = Depends(get_current_user)) -> list[Pr
 def get_platform_overview(current_user: AuthUser = Depends(get_current_user)) -> PlatformOverview:
     """Aggregate dashboard-friendly metrics for the frontend."""
     return platform_service.get_overview(current_user)
+
+
+@router.get("/portfolio-saved-views", response_model=list[PortfolioSavedViewSummary])
+def list_portfolio_saved_views(current_user: AuthUser = Depends(get_current_user)) -> list[PortfolioSavedViewSummary]:
+    """Return personal and shared tenant portfolio views visible to the caller."""
+    return platform_service.list_portfolio_saved_views(current_user)
+
+
+@router.post("/portfolio-saved-views", response_model=PortfolioSavedViewSummary, status_code=201)
+def create_portfolio_saved_view(
+    payload: PortfolioSavedViewCreate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> PortfolioSavedViewSummary:
+    """Persist a reusable portfolio dashboard view for the current tenant."""
+    return platform_service.create_portfolio_saved_view(payload, current_user)
+
+
+@router.delete("/portfolio-saved-views/{view_id}", status_code=204)
+def delete_portfolio_saved_view(
+    view_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> Response:
+    """Delete a portfolio dashboard view owned by the current caller."""
+    platform_service.delete_portfolio_saved_view(view_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/portfolio-saved-views/{view_id}", response_model=PortfolioSavedViewSummary)
+def update_portfolio_saved_view(
+    view_id: str,
+    payload: PortfolioSavedViewUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+) -> PortfolioSavedViewSummary:
+    """Update a portfolio dashboard view owned by the current caller."""
+    return platform_service.update_portfolio_saved_view(view_id, payload, current_user)
 
 
 @router.get("/{project_id}/workspace", response_model=ProjectWorkspace)
@@ -329,6 +368,16 @@ def get_project_roi_variance_analysis(
 ) -> RoiVarianceAnalysis:
     """Compare recorded realized operating results against the original underwriting path."""
     return platform_service.build_project_roi_variance_analysis(project_id, scenario_id, current_user)
+
+
+@router.get("/{project_id}/roi-scenarios/{scenario_id}/recommendation-drift", response_model=RoiRecommendationDriftResponse)
+def get_project_roi_recommendation_drift(
+    project_id: str,
+    scenario_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> RoiRecommendationDriftResponse:
+    """Reforecast recommendation quality after blending realized actuals into the remaining plan."""
+    return platform_service.build_project_roi_recommendation_drift(project_id, scenario_id, current_user)
 
 
 @router.get("/{project_id}", response_model=ProjectSummary)

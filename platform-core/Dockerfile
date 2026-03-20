@@ -6,7 +6,20 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libcairo2-dev \
+    pkg-config \
+    libffi-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    python3-dev \
+    build-essential \
+    && pip install --no-cache-dir -r requirements.txt \
+    && apt-get remove -y --purge gcc g++ build-essential python3-dev \
+    && apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 

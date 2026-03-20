@@ -17,6 +17,7 @@ from app.models.platform_tables import (
     IngestionRunRecord,
     ListingRecord,
     MarketInsightRecord,
+    PortfolioSavedViewRecord,
     ProjectDocumentRecord,
     ProjectMemberRecord,
     ProjectNoteRecord,
@@ -33,8 +34,14 @@ from app.schemas.ingestion import IngestionRunSummary
 from app.schemas.listing import ListingCreate, ListingSummary
 from app.schemas.market import MarketInsight, MarketInsightCreate
 from app.schemas.note import ProjectNoteSummary
-from app.schemas.project import ProjectSummary
-from app.schemas.roi import RoiActualSummary, RoiBenchmarkCompSummary, RoiScenarioRecommendation, RoiScenarioSummary
+from app.schemas.project import PortfolioSavedViewCreate, PortfolioSavedViewSummary, PortfolioSavedViewUpdate, ProjectSummary
+from app.schemas.roi import (
+    RoiActualSummary,
+    RoiBenchmarkCompSummary,
+    RoiBenchmarkCompUpdate,
+    RoiScenarioRecommendation,
+    RoiScenarioSummary,
+)
 
 
 logger = logging.getLogger("torilaure.platform.persistence")
@@ -62,6 +69,7 @@ class PlatformStorageService:
                 "project_roi_scenarios",
                 "project_roi_actuals",
                 "benchmark_comps",
+                "portfolio_saved_views",
             }
             if not required_tables.issubset(set(inspector.get_table_names())):
                 raise SQLAlchemyError("Platform tables are missing. Run `alembic upgrade head`.")
@@ -450,6 +458,24 @@ class PlatformStorageService:
             session.refresh(record)
             return self._to_benchmark_comp_summary(record)
 
+    def update_benchmark_comp(self, tenant_id: str, comp_id: str, payload: RoiBenchmarkCompUpdate) -> RoiBenchmarkCompSummary | None:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(BenchmarkCompRecord).where(
+                    BenchmarkCompRecord.id == comp_id,
+                    BenchmarkCompRecord.tenant_id == tenant_id,
+                )
+            )
+            if record is None:
+                return None
+            record.included = payload.included
+            record.override_mode = payload.override_mode
+            if payload.note is not None:
+                record.note = payload.note
+            session.flush()
+            session.refresh(record)
+            return self._to_benchmark_comp_summary(record)
+
     def create_listing(self, tenant_id: str, payload: ListingCreate) -> ListingSummary:
         with self.session_scope() as session:
             record = ListingRecord(
@@ -559,6 +585,79 @@ class PlatformStorageService:
                 .order_by(AlertPreferenceRecord.name.asc())
             ).all()
             return [self._to_alert_preference(record) for record in records]
+
+    def list_portfolio_saved_views(self, tenant_id: str, user_id: str) -> list[PortfolioSavedViewSummary]:
+        with self.session_scope() as session:
+            records = session.scalars(
+                select(PortfolioSavedViewRecord)
+                .where(
+                    PortfolioSavedViewRecord.tenant_id == tenant_id,
+                    (PortfolioSavedViewRecord.is_shared.is_(True)) | (PortfolioSavedViewRecord.created_by == user_id),
+                )
+                .order_by(PortfolioSavedViewRecord.is_shared.desc(), PortfolioSavedViewRecord.created_at.desc())
+            ).all()
+            return [self._to_portfolio_saved_view(record) for record in records]
+
+    def create_portfolio_saved_view(
+        self,
+        tenant_id: str,
+        created_by: str,
+        created_by_name: str,
+        payload: PortfolioSavedViewCreate,
+    ) -> PortfolioSavedViewSummary:
+        with self.session_scope() as session:
+            record = PortfolioSavedViewRecord(
+                id=f"portfolio-view-{uuid4().hex[:8]}",
+                tenant_id=tenant_id,
+                created_by=created_by,
+                created_by_name=created_by_name,
+                name=payload.name,
+                portfolio_view=payload.portfolio_view,
+                is_shared=payload.is_shared,
+            )
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return self._to_portfolio_saved_view(record)
+
+    def delete_portfolio_saved_view(self, tenant_id: str, user_id: str, view_id: str) -> bool:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(PortfolioSavedViewRecord).where(
+                    PortfolioSavedViewRecord.id == view_id,
+                    PortfolioSavedViewRecord.tenant_id == tenant_id,
+                    PortfolioSavedViewRecord.created_by == user_id,
+                )
+            )
+            if record is None:
+                return False
+            session.delete(record)
+            session.flush()
+            return True
+
+    def update_portfolio_saved_view(
+        self,
+        tenant_id: str,
+        user_id: str,
+        view_id: str,
+        payload: PortfolioSavedViewUpdate,
+    ) -> PortfolioSavedViewSummary | None:
+        with self.session_scope() as session:
+            record = session.scalar(
+                select(PortfolioSavedViewRecord).where(
+                    PortfolioSavedViewRecord.id == view_id,
+                    PortfolioSavedViewRecord.tenant_id == tenant_id,
+                    PortfolioSavedViewRecord.created_by == user_id,
+                )
+            )
+            if record is None:
+                return None
+            record.name = payload.name
+            record.portfolio_view = payload.portfolio_view
+            record.is_shared = payload.is_shared
+            session.flush()
+            session.refresh(record)
+            return self._to_portfolio_saved_view(record)
 
     def create_alert(self, tenant_id: str, payload: AlertPreferenceCreate) -> AlertPreference:
         with self.session_scope() as session:
@@ -918,7 +1017,21 @@ class PlatformStorageService:
             average_dscr=record.average_dscr,
             occupancy_rate=record.occupancy_rate,
             leverage_ratio=record.leverage_ratio,
+            included=record.included,
+            override_mode=record.override_mode,
             note=record.note,
+            created_at=record.created_at,
+        )
+
+    def _to_portfolio_saved_view(self, record: PortfolioSavedViewRecord) -> PortfolioSavedViewSummary:
+        return PortfolioSavedViewSummary(
+            id=record.id,
+            tenant_id=record.tenant_id,
+            created_by=record.created_by,
+            created_by_name=record.created_by_name,
+            name=record.name,
+            portfolio_view=record.portfolio_view,
+            is_shared=record.is_shared,
             created_at=record.created_at,
         )
 

@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getSession } from "../auth";
 import {
   addProjectMember,
+  analyzeProjectRoiScenario,
   buildProjectRoiSensitivity,
   calculateProjectRoiScenario,
   createProjectNote,
+  createProjectRoiActual,
   createProjectRoiRecommendation,
   createProjectRoiScenario,
   deleteProjectNote,
   deleteProjectRoiScenario,
   downloadProjectDocument,
   fetchProjectDocumentPreview,
+  getProjectRoiRecommendationDrift,
+  getProjectRoiVarianceAnalysis,
   listProjectRoiRecommendations,
+  listProjectRoiActuals,
   fetchProjectMembers,
   fetchProjectRoiSnapshot,
   downloadProjectRoiRecommendationsPDF,
@@ -25,6 +30,11 @@ import {
 import { logoutSession } from "../api/sessionClient";
 import { FileUploadPanel } from "../components/FileUploadPanel";
 import { SectionTitle } from "../components/SectionTitle";
+import { ROIRecommendationPanel } from "../components/ROIRecommendationPanel";
+import { BenchmarkAssessmentPanel } from "../components/BenchmarkAssessmentPanel";
+import { VarianceAnalysisPanel } from "../components/VarianceAnalysisPanel";
+import { RoiActualsPanel } from "../components/RoiActualsPanel";
+import { RecommendationDriftPanel } from "../components/RecommendationDriftPanel";
 
 function formatCurrency(value) {
   if (value == null) {
@@ -98,6 +108,16 @@ const defaultLeaseAssumptions = [
   },
 ];
 
+const emptyActualsForm = {
+  period_start: "",
+  effective_revenue: "",
+  operating_expenses: "",
+  capex: "0",
+  debt_service: "0",
+  occupancy_rate: "",
+  note: "",
+};
+
 function canManageNote(note, project, sessionUser) {
   if (!note || !project || !sessionUser) {
     return false;
@@ -111,11 +131,23 @@ function canManageNote(note, project, sessionUser) {
   return note.author_id === sessionUser.id;
 }
 
+function formatPortfolioViewLabel(value) {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function ProjectDetailPage() {
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const session = getSession();
   const currentUserId = session?.user?.id;
+  const requestedScenarioId = searchParams.get("scenario") || "";
+  const navigationSource = searchParams.get("from") || "";
+  const portfolioView = searchParams.get("portfolio") || "";
   const [workspace, setWorkspace] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingNote, setIsSavingNote] = useState(false);
@@ -132,10 +164,21 @@ export function ProjectDetailPage() {
   const [roiPreview, setRoiPreview] = useState(null);
   const [roiSensitivity, setRoiSensitivity] = useState(null);
   const [roiRecommendations, setRoiRecommendations] = useState([]);
+  const [projectRecommendationHistory, setProjectRecommendationHistory] = useState([]);
   const [selectedRoiScenarioId, setSelectedRoiScenarioId] = useState("");
   const [isSavingRoiRecommendation, setIsSavingRoiRecommendation] = useState(false);
   const [memberEmail, setMemberEmail] = useState("");
   const [previewState, setPreviewState] = useState({ title: "", text: "", isLoading: false, isOpen: false });
+  
+  // Analysis state for new ROI panels
+  const [analysisData, setAnalysisData] = useState(null);
+  const [varianceData, setVarianceData] = useState(null);
+  const [recommendationDrift, setRecommendationDrift] = useState(null);
+  const [roiActuals, setRoiActuals] = useState([]);
+  const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
+  const [isSavingActual, setIsSavingActual] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [actualsForm, setActualsForm] = useState(emptyActualsForm);
 
   useEffect(() => {
     let isMounted = true;
@@ -160,10 +203,21 @@ export function ProjectDetailPage() {
         }
         setWorkspace((current) => ({ ...(current ?? data), members, roi_snapshot: roiSnapshot }));
 
-        const firstScenarioId = (data.roi_scenarios && data.roi_scenarios[0]?.id) || "";
-        setSelectedRoiScenarioId(firstScenarioId);
-        if (firstScenarioId) {
-          await loadRoiRecommendationsForScenario(firstScenarioId);
+        const availableScenarios = data.roi_scenarios ?? [];
+        const initialScenarioId =
+          availableScenarios.find((scenario) => scenario.id === requestedScenarioId)?.id ||
+          availableScenarios[0]?.id ||
+          "";
+        await loadProjectRecommendationHistory(availableScenarios);
+        setSelectedRoiScenarioId(initialScenarioId);
+        if (initialScenarioId) {
+          setSearchParams((current) => {
+            const next = new URLSearchParams(current);
+            next.set("scenario", initialScenarioId);
+            return next;
+          }, { replace: true });
+          await loadRoiRecommendationsForScenario(initialScenarioId);
+          await loadAnalysisForScenario(initialScenarioId, data.roi_scenarios);
         }
       } catch (error) {
         if (!isMounted) {
@@ -187,7 +241,20 @@ export function ProjectDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [navigate, projectId]);
+  }, [navigate, projectId, setSearchParams]);
+
+  useEffect(() => {
+    if (!workspace?.roi_scenarios?.length || !requestedScenarioId || requestedScenarioId === selectedRoiScenarioId) {
+      return;
+    }
+    const matchedScenario = workspace.roi_scenarios.find((scenario) => scenario.id === requestedScenarioId);
+    if (!matchedScenario) {
+      return;
+    }
+    setSelectedRoiScenarioId(requestedScenarioId);
+    loadRoiRecommendationsForScenario(requestedScenarioId);
+    loadAnalysisForScenario(requestedScenarioId, workspace.roi_scenarios);
+  }, [requestedScenarioId, selectedRoiScenarioId, workspace]);
 
   async function handleDocumentUpload(file) {
     const payload = await uploadProjectDocument(projectId, file);
@@ -411,6 +478,43 @@ export function ProjectDetailPage() {
     });
   }
 
+  function selectScenario(scenarioId, scenarios = workspace?.roi_scenarios) {
+    setSelectedRoiScenarioId(scenarioId);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (scenarioId) {
+        next.set("scenario", scenarioId);
+      } else {
+        next.delete("scenario");
+      }
+      return next;
+    }, { replace: true });
+    loadRoiRecommendationsForScenario(scenarioId);
+    loadAnalysisForScenario(scenarioId, scenarios);
+  }
+
+  function getReturnTarget() {
+    const dashboardParams = new URLSearchParams();
+    if (portfolioView) {
+      dashboardParams.set("portfolio", portfolioView);
+    }
+    if (navigationSource === "stress") {
+      dashboardParams.set("view", "stress");
+      return { label: "Back to portfolio stress", href: `/dashboard?${dashboardParams.toString()}` };
+    }
+    if (navigationSource === "allocation") {
+      dashboardParams.set("view", "allocation");
+      return { label: "Back to capital concentration", href: `/dashboard?${dashboardParams.toString()}` };
+    }
+    if (navigationSource === "ranking") {
+      dashboardParams.set("view", "ranking");
+      return { label: "Back to scenario rankings", href: `/dashboard?${dashboardParams.toString()}` };
+    }
+    return null;
+  }
+
+  const returnTarget = getReturnTarget();
+
   function getRoiPayload() {
     let leaseAssumptions = [];
     try {
@@ -516,6 +620,107 @@ export function ProjectDetailPage() {
     }
   }
 
+  async function loadProjectRecommendationHistory(scenarios = workspace?.roi_scenarios) {
+    const scenarioList = scenarios ?? [];
+    if (!scenarioList.length) {
+      setProjectRecommendationHistory([]);
+      return;
+    }
+    try {
+      const recommendationGroups = await Promise.all(
+        scenarioList.map(async (scenario) => {
+          const items = await listProjectRoiRecommendations(projectId, scenario.id);
+          return items.map((item) => ({
+            ...item,
+            scenario_name: scenario.name,
+            scenario_type: scenario.scenario_type,
+          }));
+        }),
+      );
+      const flattened = recommendationGroups
+        .flat()
+        .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+      setProjectRecommendationHistory(flattened);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to load project recommendation history.");
+    }
+  }
+
+  function updateActualsForm(field, value) {
+    setActualsForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function loadAnalysisForScenario(scenarioId, scenarios = workspace?.roi_scenarios) {
+    if (!scenarioId) {
+      setAnalysisData(null);
+      setVarianceData(null);
+      setRecommendationDrift(null);
+      setRoiActuals([]);
+      return;
+    }
+    try {
+      setIsLoadingAnalysis(true);
+      setAnalysisError("");
+      
+      const scenario = scenarios?.find((s) => s.id === scenarioId);
+      if (scenario) {
+        const analysisPayload = await analyzeProjectRoiScenario(projectId, {
+          name: scenario.name,
+          scenario_type: scenario.scenario_type,
+          listing_id: scenario.listing_id || null,
+          lease_assumptions: scenario.lease_assumptions || [],
+          purchase_price: scenario.purchase_price,
+          upfront_capex: scenario.upfront_capex,
+          annual_revenue: scenario.annual_revenue,
+          vacancy_rate: scenario.vacancy_rate,
+          annual_operating_expenses: scenario.annual_operating_expenses,
+          annual_capex_reserve: scenario.annual_capex_reserve,
+          initial_working_capital: scenario.initial_working_capital,
+          working_capital_percent_of_revenue: scenario.working_capital_percent_of_revenue,
+          annual_depreciation: scenario.annual_depreciation,
+          acquisition_fee_rate: scenario.acquisition_fee_rate,
+          loan_origination_fee_rate: scenario.loan_origination_fee_rate,
+          annual_revenue_growth_rate: scenario.annual_revenue_growth_rate,
+          annual_expense_growth_rate: scenario.annual_expense_growth_rate,
+          exit_cap_rate: scenario.exit_cap_rate,
+          exit_cost_rate: scenario.exit_cost_rate,
+          hold_period_years: scenario.hold_period_years,
+          discount_rate: scenario.discount_rate,
+          risk_free_rate: scenario.risk_free_rate,
+          equity_risk_premium: scenario.equity_risk_premium,
+          beta: scenario.beta,
+          debt_spread: scenario.debt_spread,
+          tax_rate: scenario.tax_rate,
+          leverage_ratio: scenario.leverage_ratio,
+          interest_rate: scenario.interest_rate,
+          interest_only_years: scenario.interest_only_years,
+          amortization_period_years: scenario.amortization_period_years,
+        });
+        
+        setAnalysisData(analysisPayload);
+        const actualsPayload = await listProjectRoiActuals(projectId, scenarioId);
+        setRoiActuals(actualsPayload);
+        const variancePayload = await getProjectRoiVarianceAnalysis(projectId, scenarioId);
+        setVarianceData(variancePayload);
+        const driftPayload = await getProjectRoiRecommendationDrift(projectId, scenarioId);
+        setRecommendationDrift(driftPayload);
+      }
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : "Unable to load analysis data.");
+    } finally {
+      setIsLoadingAnalysis(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!selectedRoiScenarioId) {
+      setAnalysisData(null);
+      setVarianceData(null);
+      setRecommendationDrift(null);
+      setRoiActuals([]);
+    }
+  }, [selectedRoiScenarioId]);
+
   async function handleCreateRoiRecommendation(scenarioId) {
     if (!scenarioId) {
       setErrorMessage("Pick a scenario first.");
@@ -527,6 +732,8 @@ export function ProjectDetailPage() {
       setErrorMessage("");
       await createProjectRoiRecommendation(projectId, scenarioId);
       await loadRoiRecommendationsForScenario(scenarioId);
+      await loadProjectRecommendationHistory(workspace?.roi_scenarios);
+      await loadAnalysisForScenario(scenarioId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to create the ROI recommendation.");
     } finally {
@@ -548,6 +755,8 @@ export function ProjectDetailPage() {
         ? currentScenarios.map((item) => (item.id === editingRoiId ? saved : item))
         : [...currentScenarios, saved];
       syncRoiWorkspace(nextScenarios);
+      selectScenario(saved.id, nextScenarios);
+      await loadProjectRecommendationHistory(nextScenarios);
       resetRoiForm();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to save the ROI scenario.");
@@ -561,7 +770,13 @@ export function ProjectDetailPage() {
       setIsSavingRoi(true);
       setErrorMessage("");
       await deleteProjectRoiScenario(projectId, scenarioId);
-      syncRoiWorkspace((workspace?.roi_scenarios ?? []).filter((item) => item.id !== scenarioId));
+      const nextScenarios = (workspace?.roi_scenarios ?? []).filter((item) => item.id !== scenarioId);
+      syncRoiWorkspace(nextScenarios);
+      await loadProjectRecommendationHistory(nextScenarios);
+      if (selectedRoiScenarioId === scenarioId) {
+        const fallbackScenarioId = nextScenarios[0]?.id ?? "";
+        selectScenario(fallbackScenarioId, nextScenarios);
+      }
       if (editingRoiId === scenarioId) {
         resetRoiForm();
       }
@@ -594,6 +809,34 @@ export function ProjectDetailPage() {
     }
   }
 
+  async function handleSaveActual(event) {
+    event.preventDefault();
+    if (!selectedRoiScenarioId) {
+      setAnalysisError("Select a saved scenario before recording actuals.");
+      return;
+    }
+
+    try {
+      setIsSavingActual(true);
+      setAnalysisError("");
+      await createProjectRoiActual(projectId, selectedRoiScenarioId, {
+        period_start: actualsForm.period_start,
+        effective_revenue: Number(actualsForm.effective_revenue),
+        operating_expenses: Number(actualsForm.operating_expenses),
+        capex: Number(actualsForm.capex || 0),
+        debt_service: Number(actualsForm.debt_service || 0),
+        occupancy_rate: actualsForm.occupancy_rate === "" ? null : Number(actualsForm.occupancy_rate),
+        note: actualsForm.note.trim(),
+      });
+      setActualsForm(emptyActualsForm);
+      await loadAnalysisForScenario(selectedRoiScenarioId);
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : "Unable to save the ROI actual.");
+    } finally {
+      setIsSavingActual(false);
+    }
+  }
+
   return (
     <main className="content projects-content">
       <section className="section-block">
@@ -605,6 +848,43 @@ export function ProjectDetailPage() {
       </section>
 
       {errorMessage ? <p className="callout-message">{errorMessage}</p> : null}
+      {returnTarget ? (
+        <section className="section-block">
+          <div className="glass-card">
+            <div className="projects-header-row">
+              <div>
+                <p className="panel-label">Portfolio drilldown</p>
+                <h3 className="projects-heading">
+                  {selectedRoiScenarioId ? "Scenario opened from dashboard" : "Project opened from dashboard"}
+                </h3>
+              </div>
+            </div>
+            <p className="hint-text">
+              You came here from the portfolio dashboard
+              {portfolioView ? ` in the ${formatPortfolioViewLabel(portfolioView)} view` : ""}
+              {selectedRoiScenarioId ? " for a specific scenario review" : ""}.
+            </p>
+            <div className="note-edit-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => navigate(returnTarget.href)}
+              >
+                {returnTarget.label}
+              </button>
+              {selectedRoiScenarioId ? (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => navigate(`/dashboard${portfolioView ? `?portfolio=${encodeURIComponent(portfolioView)}&view=ranking` : "?view=ranking"}`)}
+                >
+                  Open all scenario rankings
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section className="project-detail-grid">
         <div className="glass-card">
@@ -1017,8 +1297,7 @@ export function ProjectDetailPage() {
                 className="login-select"
                 value={selectedRoiScenarioId}
                 onChange={(event) => {
-                  setSelectedRoiScenarioId(event.target.value);
-                  loadRoiRecommendationsForScenario(event.target.value);
+                  selectScenario(event.target.value);
                 }}
               >
                 <option value="">Select scenario</option>
@@ -1094,6 +1373,37 @@ export function ProjectDetailPage() {
           </div>
 
           <div className="note-list">
+            <h4>Recommendation audit trail</h4>
+            {projectRecommendationHistory.length > 0 ? (
+              projectRecommendationHistory.map((recommendation) => (
+                <article key={`${recommendation.scenario_id}-${recommendation.created_at}`} className="note-card">
+                  <div className="note-card-header">
+                    <div>
+                      <strong>{recommendation.recommendation.recommendation.toUpperCase()}</strong>
+                      <small>
+                        {recommendation.scenario_name} ({recommendation.scenario_type}) | {new Date(recommendation.created_at).toLocaleString()}
+                      </small>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => selectScenario(recommendation.scenario_id)}
+                    >
+                      Open scenario
+                    </button>
+                  </div>
+                  <p>
+                    Conviction: {recommendation.recommendation.conviction} | Score: {recommendation.recommendation.score.toFixed(1)}
+                  </p>
+                  <p>{recommendation.recommendation.rationale.join(" ")}</p>
+                </article>
+              ))
+            ) : (
+              <p className="hint-text">No recommendation history has been captured across this project yet.</p>
+            )}
+          </div>
+
+          <div className="note-list">
             {(workspace?.roi_scenarios ?? []).map((scenario) => (
               <article key={scenario.id} className="note-card">
                 <div className="note-card-header">
@@ -1132,6 +1442,52 @@ export function ProjectDetailPage() {
             ))}
             {!workspace?.roi_scenarios?.length && !isLoading ? <p className="hint-text">No ROI scenarios have been saved for this project yet.</p> : null}
           </div>
+
+          {/* ROI Analysis Panels - Recommendation, Benchmark, and Variance */}
+          {selectedRoiScenarioId && (
+            <section className="roi-analysis-section">
+              <RoiActualsPanel
+                scenario={workspace?.roi_scenarios?.find((s) => s.id === selectedRoiScenarioId)}
+                actuals={roiActuals}
+                form={actualsForm}
+                loading={isLoadingAnalysis}
+                saving={isSavingActual}
+                error={analysisError}
+                canEdit={canManageProject}
+                onChange={updateActualsForm}
+                onSubmit={handleSaveActual}
+              />
+              <ROIRecommendationPanel
+                scenario={workspace?.roi_scenarios?.find((s) => s.id === selectedRoiScenarioId)}
+                analysisData={analysisData}
+                loading={isLoadingAnalysis}
+                error={analysisError}
+                onRefresh={() => loadAnalysisForScenario(selectedRoiScenarioId)}
+              />
+              <BenchmarkAssessmentPanel
+                scenario={workspace?.roi_scenarios?.find((s) => s.id === selectedRoiScenarioId)}
+                benchmarkAssessment={analysisData?.analysis}
+                benchmarkContext={analysisData?.benchmark_context}
+                loading={isLoadingAnalysis}
+                error={analysisError}
+                onRefresh={() => loadAnalysisForScenario(selectedRoiScenarioId)}
+              />
+              <VarianceAnalysisPanel
+                scenario={workspace?.roi_scenarios?.find((s) => s.id === selectedRoiScenarioId)}
+                varianceData={varianceData}
+                loading={isLoadingAnalysis}
+                error={analysisError}
+                onRefresh={() => loadAnalysisForScenario(selectedRoiScenarioId)}
+              />
+              <RecommendationDriftPanel
+                scenario={workspace?.roi_scenarios?.find((s) => s.id === selectedRoiScenarioId)}
+                driftData={recommendationDrift}
+                loading={isLoadingAnalysis}
+                error={analysisError}
+                onRefresh={() => loadAnalysisForScenario(selectedRoiScenarioId)}
+              />
+            </section>
+          )}
         </div>
 
         <div className="glass-card">

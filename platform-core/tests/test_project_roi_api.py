@@ -43,6 +43,7 @@ class ProjectRoiApiTests(unittest.TestCase):
         platform_service._roi_scenarios = [RoiScenarioSummary.model_validate(item) for item in deepcopy(ROI_SCENARIOS)]
         platform_service._roi_actuals = []
         platform_service._benchmark_comps = []
+        platform_service._portfolio_saved_views = []
 
     def tearDown(self) -> None:
         user_storage_service.list_tenant_users = self._original_list_tenant_users
@@ -99,6 +100,26 @@ class ProjectRoiApiTests(unittest.TestCase):
             payload["roi_snapshot"]["scenario_rankings"][0]["recommendation"],
             {"invest", "watch", "reject"},
         )
+
+    def test_overview_includes_roi_portfolio_rollup(self) -> None:
+        response = self.client.get(
+            "/api/v1/projects/overview",
+            headers=self.auth_headers(
+                user_id="user-ravi-kafley",
+                email="founder@example.com",
+                full_name="Ravi Kafley",
+                role="admin",
+                tenant_id="tenant-torilaure",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("roi_portfolio", payload)
+        self.assertGreaterEqual(payload["roi_portfolio"]["total_roi_scenarios"], 1)
+        self.assertIn("top_scenarios", payload["roi_portfolio"])
+        self.assertIn("capital_allocation", payload["roi_portfolio"])
+        self.assertIn("downside_stress_views", payload["roi_portfolio"])
 
     def test_preview_roi_scenario_returns_computed_metrics(self) -> None:
         response = self.client.post(
@@ -297,6 +318,8 @@ class ProjectRoiApiTests(unittest.TestCase):
         self.assertIn("risk_adjusted_score", payload["analysis"])
         self.assertIn("recommendation", payload)
         self.assertIn(payload["recommendation"]["conviction"], {"low", "medium", "high"})
+        self.assertIn("benchmark_context", payload)
+        self.assertEqual(payload["benchmark_context"]["source_mode"], "default_profile")
 
     def test_roi_sensitivity_returns_matrix(self) -> None:
         response = self.client.post(
@@ -377,6 +400,18 @@ class ProjectRoiApiTests(unittest.TestCase):
         self.assertIn("total_noi_variance", variance)
         self.assertGreaterEqual(len(variance["variance_summary"]), 1)
 
+        drift_response = self.client.get(
+            "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/roi-base-sunbelt/recommendation-drift",
+            headers=headers,
+        )
+        self.assertEqual(drift_response.status_code, 200)
+        drift = drift_response.json()
+        self.assertEqual(drift["actual_months_recorded"], 1)
+        self.assertIn(drift["drift_status"], {"stable", "improving", "deteriorating"})
+        self.assertIn(drift["recommended_action"], {"maintain", "upgrade", "downgrade"})
+        self.assertIn("reforecast_scenario", drift)
+        self.assertIn("reforecast_recommendation", drift)
+
     def test_admin_can_create_benchmark_comp_and_get_calibration(self) -> None:
         headers = self.auth_headers(
             user_id="user-ravi-kafley",
@@ -414,6 +449,74 @@ class ProjectRoiApiTests(unittest.TestCase):
         calibration = calibration_response.json()
         self.assertEqual(calibration["source_mode"], "external_comps")
         self.assertGreaterEqual(calibration["comp_count"], 1)
+        self.assertIn("effective_comp_count", calibration)
+        self.assertIn("stale_comp_count", calibration)
+        self.assertIn("excluded_outlier_count", calibration)
+
+        create_response_two = self.client.post(
+            "/api/v1/market/benchmark-comps",
+            headers=headers,
+            json={
+                "asset_class": "real-estate",
+                "location": "Houston, TX",
+                "source_name": "older-comp-set",
+                "closed_on": str(date(2023, 1, 15)),
+                "sale_price": 7200000,
+                "net_operating_income": 540000,
+                "cap_rate": 7.5,
+                "projected_irr": 12.1,
+                "equity_multiple": 1.55,
+                "average_dscr": 1.08,
+                "occupancy_rate": 88.0,
+                "leverage_ratio": 71.0,
+                "note": "Older out-of-market comp",
+            },
+        )
+        self.assertEqual(create_response_two.status_code, 201)
+        created_two = create_response_two.json()
+
+        location_calibration_response = self.client.get(
+            "/api/v1/market/benchmark-calibration/real-estate?location=Charlotte,%20NC",
+            headers=headers,
+        )
+        self.assertEqual(location_calibration_response.status_code, 200)
+        location_calibration = location_calibration_response.json()
+        self.assertEqual(location_calibration["matched_location"], "Charlotte, NC")
+        self.assertGreaterEqual(location_calibration["stale_comp_count"], 1)
+        self.assertTrue(any("Charlotte, NC" in note for note in location_calibration["notes"]))
+
+        exclude_response = self.client.put(
+            f"/api/v1/market/benchmark-comps/{created_two['id']}",
+            headers=headers,
+            json={
+                "included": False,
+                "override_mode": "exclude_outlier",
+                "note": "Excluded as a weak geographic fit",
+            },
+        )
+        self.assertEqual(exclude_response.status_code, 200)
+        self.assertFalse(exclude_response.json()["included"])
+        self.assertEqual(exclude_response.json()["override_mode"], "exclude_outlier")
+
+        force_include_response = self.client.put(
+            f"/api/v1/market/benchmark-comps/{create_response.json()['id']}",
+            headers=headers,
+            json={
+                "included": True,
+                "override_mode": "force_include",
+                "note": "Keep this comp in the calibration set",
+            },
+        )
+        self.assertEqual(force_include_response.status_code, 200)
+        self.assertEqual(force_include_response.json()["override_mode"], "force_include")
+
+        recalibration_response = self.client.get(
+            "/api/v1/market/benchmark-calibration/real-estate?location=Charlotte,%20NC",
+            headers=headers,
+        )
+        self.assertEqual(recalibration_response.status_code, 200)
+        recalibration = recalibration_response.json()
+        self.assertEqual(recalibration["comp_count"], 1)
 
         analysis_response = self.client.post(
             "/api/v1/projects/proj-roi-sunbelt/roi-scenarios/analyze",
@@ -440,6 +543,102 @@ class ProjectRoiApiTests(unittest.TestCase):
             analysis["analysis"]["benchmark_assessment"]["notes"][1],
             "Benchmark ranges were calibrated from comparable records.",
         )
+        self.assertEqual(analysis["benchmark_context"]["source_mode"], "external_comps")
+        self.assertGreaterEqual(len(analysis["benchmark_context"]["comps"]), 1)
+        self.assertIn(
+            analysis["benchmark_context"]["comps"][0]["influence"],
+            {"used", "downweighted", "forced", "excluded_outlier", "excluded_by_analyst", "not_used"},
+        )
+
+    def test_overview_includes_downside_stress_views(self) -> None:
+        response = self.client.get(
+            "/api/v1/projects/overview",
+            headers=self.auth_headers(
+                user_id="user-ravi-kafley",
+                email="founder@example.com",
+                full_name="Ravi Kafley",
+                role="admin",
+                tenant_id="tenant-torilaure",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        stress_views = payload["roi_portfolio"]["downside_stress_views"]
+        self.assertGreaterEqual(len(stress_views), 1)
+        self.assertIn(stress_views[0]["fragility"], {"low", "medium", "high"})
+        self.assertIn("irr_compression", stress_views[0])
+        self.assertIn("npv_drawdown", stress_views[0])
+
+    def test_admin_can_manage_portfolio_saved_views(self) -> None:
+        headers = self.auth_headers(
+            user_id="user-ravi-kafley",
+            email="founder@example.com",
+            full_name="Ravi Kafley",
+            role="admin",
+            tenant_id="tenant-torilaure",
+        )
+        create_response = self.client.post(
+            "/api/v1/projects/portfolio-saved-views",
+            headers=headers,
+            json={
+                "name": "Team Fragility Lens",
+                "portfolio_view": "high_fragility",
+                "is_shared": True,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201)
+        created = create_response.json()
+        self.assertEqual(created["portfolio_view"], "high_fragility")
+        self.assertTrue(created["is_shared"])
+
+        list_response = self.client.get(
+            "/api/v1/projects/portfolio-saved-views",
+            headers=headers,
+        )
+        self.assertEqual(list_response.status_code, 200)
+        items = list_response.json()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["name"], "Team Fragility Lens")
+
+        update_response = self.client.put(
+            f"/api/v1/projects/portfolio-saved-views/{created['id']}",
+            headers=headers,
+            json={
+                "name": "Revised Fragility Lens",
+                "portfolio_view": "watchlist",
+                "is_shared": False,
+            },
+        )
+        self.assertEqual(update_response.status_code, 200)
+        updated = update_response.json()
+        self.assertEqual(updated["name"], "Revised Fragility Lens")
+        self.assertEqual(updated["portfolio_view"], "watchlist")
+        self.assertFalse(updated["is_shared"])
+
+        delete_response = self.client.delete(
+            f"/api/v1/projects/portfolio-saved-views/{created['id']}",
+            headers=headers,
+        )
+        self.assertEqual(delete_response.status_code, 204)
+
+    def test_investor_cannot_create_portfolio_saved_view(self) -> None:
+        response = self.client.post(
+            "/api/v1/projects/portfolio-saved-views",
+            headers=self.auth_headers(
+                user_id="user-investor-demo",
+                email="investor@example.com",
+                full_name="Investor Demo",
+                role="investor",
+                tenant_id="tenant-torilaure",
+            ),
+            json={
+                "name": "Blocked View",
+                "portfolio_view": "watchlist",
+                "is_shared": False,
+            },
+        )
+        self.assertEqual(response.status_code, 403)
 
     def test_investor_cannot_create_roi_scenario(self) -> None:
         response = self.client.post(

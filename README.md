@@ -110,6 +110,17 @@ cd infra/docker
 docker compose up --build
 ```
 
+If the backend keeps printing `Waiting for PostgreSQL...` and the Postgres logs say `Role "app_user" does not exist`, the named Docker volume was likely initialized earlier with different credentials. In local development, the simplest recovery is:
+
+```bash
+cd infra/docker
+docker compose down
+docker volume rm intelligence-os_torilaure-postgres-data
+docker compose up --build
+```
+
+Only remove that volume if you are comfortable discarding the local Postgres data stored in the Docker stack.
+
 Local defaults:
 - Frontend: `http://localhost:5174`
 - Backend: `http://localhost:8000`

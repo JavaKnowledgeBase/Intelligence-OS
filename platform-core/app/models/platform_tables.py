@@ -375,5 +375,22 @@ class BenchmarkCompRecord(Base):
     average_dscr: Mapped[float | None] = mapped_column(Float, nullable=True)
     occupancy_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     leverage_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    included: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    override_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="normal")
     note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PortfolioSavedViewRecord(Base):
+    """Tenant-scoped saved dashboard filters that can be personal or shared."""
+
+    __tablename__ = "portfolio_saved_views"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_by_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    portfolio_view: Mapped[str] = mapped_column(String(40), nullable=False)
+    is_shared: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
